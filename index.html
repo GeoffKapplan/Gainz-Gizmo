@@ -11,6 +11,17 @@
 <meta name="apple-mobile-web-app-title" content="Gainz Gizmo" />
 <meta name="mobile-web-app-capable" content="yes" />
 <meta name="theme-color" content="#0c0a09" />
+<link rel="apple-touch-icon" href="icon-192.png" />
+<link rel="icon" href="icon-192.png" />
+
+<!-- Web app manifest + service worker: required for Android to treat this as an
+     installable PWA, which is what lets it be packaged into a real APK -->
+<link rel="manifest" href="manifest.json" />
+<script>
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => navigator.serviceWorker.register('sw.js'));
+  }
+</script>
 
 <!-- Tailwind (JIT, compiles in-browser) -->
 <script src="https://cdn.tailwindcss.com"></script>
