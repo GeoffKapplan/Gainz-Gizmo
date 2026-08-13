@@ -5,7 +5,6 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
 <title>Gainz Gizmo</title>
 
-<!-- Makes this behave like a standalone app when added to an iOS home screen -->
 <meta name="apple-mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 <meta name="apple-mobile-web-app-title" content="Gainz Gizmo" />
@@ -15,8 +14,6 @@
 <link rel="icon" href="icon-192.png" />
 <link rel="shortcut icon" href="favicon.ico" />
 
-<!-- Web app manifest + service worker: required for Android to treat this as an
-     installable PWA, which is what lets it be packaged into a real APK -->
 <link rel="manifest" href="manifest.json" />
 <script>
   if ('serviceWorker' in navigator) {
@@ -24,14 +21,11 @@
   }
 </script>
 
-<!-- Tailwind (JIT, compiles in-browser) -->
 <script src="https://cdn.tailwindcss.com"></script>
 
-<!-- React -->
 <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 
-<!-- Babel standalone: lets this file use JSX directly in the browser, no build step -->
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
 <style>
@@ -42,10 +36,6 @@
 <div id="root"></div>
 
 <script>
-  // Storage shim: gives window.storage.get/set the same shape the app already expects,
-  // backed by this browser's localStorage instead of Claude's artifact storage API.
-  // Personal to this browser/device only -- it won't sync across devices the way the
-  // Claude-hosted version did.
   window.storage = {
     async get(key) {
       try {
@@ -84,7 +74,6 @@
   };
 </script>
 
-<!-- Raw JSX source, held as inert text so the browser doesn't try to run it directly -->
 <script type="text/plain" id="app-source">
 // Minimal inline icon set (Lucide-compatible paths) so this file has zero runtime
 // dependency on an icon package.
@@ -247,6 +236,29 @@ const ChevronDown = (props) => (
 const ChevronUp = (props) => (
   <Icon {...props}>
     <path d="m18 15-6-6-6 6" />
+  </Icon>
+);
+
+const Search = (props) => (
+  <Icon {...props}>
+    <path d="m21 21-4.34-4.34" />
+    <circle cx="11" cy="11" r="8" />
+  </Icon>
+);
+
+const Download = (props) => (
+  <Icon {...props}>
+    <path d="M12 15V3" />
+    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+    <path d="m7 10 5 5 5-5" />
+  </Icon>
+);
+
+const Upload = (props) => (
+  <Icon {...props}>
+    <path d="M12 3v12" />
+    <path d="m17 8-5-5-5 5" />
+    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
   </Icon>
 );
 const { useState, useEffect, useRef } = React;
@@ -471,6 +483,15 @@ function dayIsComplete(day, loggedIds) {
   return day.exercises.length > 0 && day.exercises.every((ex) => loggedIds.includes(ex.id));
 }
 
+function meaningfulSets(sets) {
+  return sets.filter((s) => s.weight !== '' || s.reps !== '');
+}
+
+function setsEqual(a, b) {
+  if (a.length !== b.length) return false;
+  return a.every((s, i) => s.weight === b[i].weight && s.reps === b[i].reps);
+}
+
 function formatDate(iso) {
   const d = new Date(iso);
   return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
@@ -533,6 +554,22 @@ function getArchivedMatches(days, name) {
   return matches;
 }
 
+// Every logged session for this name, across every day slot and archived slot, newest first.
+// This is the "full" history -- the Log view only ever shows a recent-3 glance.
+function getFullHistory(days, name) {
+  const lower = name.toLowerCase();
+  const entries = [];
+  const consider = (ex) => {
+    if (ex.name.toLowerCase() !== lower) return;
+    ex.history.forEach((h) => entries.push(h));
+  };
+  days.forEach((d) => {
+    d.exercises.forEach(consider);
+    (d.archived || []).forEach(consider);
+  });
+  return entries.sort((a, b) => new Date(b.date) - new Date(a.date));
+}
+
 function ExerciseTracker() {
   const [data, setData] = useState(null);
   const [view, setView] = useState('log'); // 'log' | 'library'
@@ -547,7 +584,6 @@ function ExerciseTracker() {
   const [swapId, setSwapId] = useState(null);
   const [addingDay, setAddingDay] = useState(false);
   const [newDayName, setNewDayName] = useState('');
-  const [justLogged, setJustLogged] = useState(null);
   const [sessionsCollapsed, setSessionsCollapsed] = useState(false);
   const [confirm, setConfirm] = useState(null); // { message, onConfirm } — replaces window.confirm, which sandboxed artifacts can silently block
   const [prName, setPrName] = useState(null); // exercise name currently shown in the PR modal
@@ -555,7 +591,7 @@ function ExerciseTracker() {
   const [draggingDayId, setDraggingDayId] = useState(null);
   const [draggingProgramId, setDraggingProgramId] = useState(null);
   const [programDropHover, setProgramDropHover] = useState(false); // true while dragging a Sessions tab over the Active Program row
-  const [cycleFlash, setCycleFlash] = useState(false);
+  const [toast, setToast] = useState(null); // { message, tone: 'success' | 'error' }
   const exerciseListRef = useRef(null);
   const exerciseDragState = useRef(null);
   const dayTabsRef = useRef(null);
@@ -567,6 +603,11 @@ function ExerciseTracker() {
   const saveTimeout = useRef(null);
 
   const askConfirm = (message, onConfirm, confirmLabel = 'Delete') => setConfirm({ message, onConfirm, confirmLabel });
+
+  const showToast = (message, tone = 'success') => {
+    setToast({ message, tone });
+    setTimeout(() => setToast((t) => (t && t.message === message ? null : t)), 3000);
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -825,6 +866,43 @@ function ExerciseTracker() {
     setData((prev) => ({ ...prev, library: prev.library.map((l) => (l.id === id ? { ...l, muscleGroup } : l)) }));
   };
 
+  const exportData = () => {
+    try {
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `gainz-gizmo-backup-${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      showToast('Backup downloaded');
+    } catch (e) {
+      showToast("Couldn't create the backup file", 'error');
+    }
+  };
+
+  // Called by LibraryView once it's read and JSON.parsed the chosen file itself.
+  const importData = (parsed) => {
+    let normalized;
+    try {
+      normalized = normalize(parsed);
+    } catch (e) {
+      showToast("That file doesn't look like a valid backup", 'error');
+      return;
+    }
+    askConfirm(
+      'Replace all current sessions, library, and program with this backup? This can\'t be undone.',
+      () => {
+        setData(normalized);
+        setActiveDayId(normalized.days[0]?.id ?? null);
+        showToast('Data restored from backup');
+      },
+      'Replace'
+    );
+  };
+
   const addSet = (dayId, exId) => {
     updateExercise(dayId, exId, (ex) => ({ ...ex, sets: [...ex.sets, { weight: '', reps: '' }] }));
   };
@@ -847,7 +925,7 @@ function ExerciseTracker() {
     const day = data.days.find((d) => d.id === dayId);
     const ex = day?.exercises.find((e) => e.id === exId);
     if (!ex) return;
-    const meaningful = ex.sets.filter((s) => s.weight !== '' || s.reps !== '');
+    const meaningful = meaningfulSets(ex.sets);
     if (!meaningful.length) return;
 
     const updatedEx = {
@@ -873,13 +951,31 @@ function ExerciseTracker() {
       program: { ...prev.program, loggedIds: cycleComplete ? [] : loggedIds },
     }));
 
-    setJustLogged(exId);
-    setTimeout(() => setJustLogged((cur) => (cur === exId ? null : cur)), 1800);
-
     if (cycleComplete) {
-      setCycleFlash(true);
-      setTimeout(() => setCycleFlash(false), 3000);
+      showToast('Program cycle complete — reset for the next round');
     }
+  };
+
+  // Pulls a logged entry back into the editable set fields, so a mis-typed log can be
+  // corrected instead of living in history forever. Works for any entry, not just the most
+  // recent -- editing re-saves with today's date when you press "Log session" again, it
+  // doesn't preserve the original entry's date.
+  const editHistoryEntry = (dayId, exId, entryId) => {
+    updateExercise(dayId, exId, (ex) => {
+      const entry = ex.history.find((h) => h.id === entryId);
+      if (!entry) return ex;
+      return {
+        ...ex,
+        sets: entry.sets.length ? entry.sets.map((s) => ({ weight: s.weight, reps: s.reps })) : [{ weight: '', reps: '' }],
+        history: ex.history.filter((h) => h.id !== entryId),
+      };
+    });
+  };
+
+  const deleteHistoryEntry = (dayId, exId, entryId, dateLabel) => {
+    askConfirm(`Delete the log from ${dateLabel}? This can't be undone.`, () => {
+      updateExercise(dayId, exId, (ex) => ({ ...ex, history: ex.history.filter((h) => h.id !== entryId) }));
+    });
   };
 
   const clearSets = (dayId, exId) => {
@@ -1032,6 +1128,9 @@ function ExerciseTracker() {
             onRemove={removeFromLibrary}
             onSelect={setPrName}
             onUpdateGroup={updateLibraryGroup}
+            onExport={exportData}
+            onImportParsed={importData}
+            onImportError={(msg) => showToast(msg, 'error')}
           />
         ) : (
           <>
@@ -1306,7 +1405,6 @@ function ExerciseTracker() {
                               onClick={() => toggleHistory(ex.id)}
                               label="History"
                               active={openHistory[ex.id]}
-                              dot={ex.history.length > 0}
                             >
                               <HistoryIcon className="w-3.5 h-3.5" />
                             </IconButton>
@@ -1320,7 +1418,9 @@ function ExerciseTracker() {
 
                     {/* Sets */}
                     <div className="px-3.5 pb-3 space-y-1.5">
-                      {ex.sets.map((s, idx) => (
+                      {ex.sets.map((s, idx) => {
+                        const prevSet = ex.history[0]?.sets[idx];
+                        return (
                         <div key={idx} className="flex items-center gap-2">
                           <span className="w-6 h-6 rounded-full bg-amber-500 text-stone-950 text-[11px] font-black flex items-center justify-center shrink-0">
                             {idx + 1}
@@ -1330,7 +1430,7 @@ function ExerciseTracker() {
                             inputMode="decimal"
                             value={s.weight}
                             onChange={(e) => updateSetField(activeDay.id, ex.id, idx, 'weight', e.target.value)}
-                            placeholder="lbs"
+                            placeholder={prevSet ? String(prevSet.weight) : 'lbs'}
                             className="w-20 bg-stone-950 border border-stone-800 rounded px-2 py-1.5 text-sm text-stone-100 placeholder-stone-700 outline-none focus:border-cyan-700 font-mono tabular-nums"
                           />
                           <span className="text-stone-600 text-sm">×</span>
@@ -1339,7 +1439,7 @@ function ExerciseTracker() {
                             inputMode="numeric"
                             value={s.reps}
                             onChange={(e) => updateSetField(activeDay.id, ex.id, idx, 'reps', e.target.value)}
-                            placeholder="reps"
+                            placeholder={prevSet ? String(prevSet.reps) : 'reps'}
                             className="w-20 bg-stone-950 border border-stone-800 rounded px-2 py-1.5 text-sm text-stone-100 placeholder-stone-700 outline-none focus:border-cyan-700 font-mono tabular-nums"
                           />
                           <button
@@ -1350,7 +1450,8 @@ function ExerciseTracker() {
                             <X className="w-3.5 h-3.5" />
                           </button>
                         </div>
-                      ))}
+                        );
+                      })}
                       <button
                         onClick={() => addSet(activeDay.id, ex.id)}
                         className="flex items-center gap-1 text-xs text-cyan-600 hover:text-cyan-400 mt-1 pl-8"
@@ -1372,25 +1473,52 @@ function ExerciseTracker() {
                       </div>
                     )}
 
-                    {/* History panel */}
+                    {/* History panel: just a recent-3 glance -- full history lives in the Library tab's PR view */}
                     {openHistory[ex.id] && (
                       <div className="px-3.5 pb-3 border-t border-stone-800 pt-2.5">
                         {ex.history.length === 0 ? (
                           <p className="text-xs text-stone-600">No sessions logged yet.</p>
                         ) : (
-                          <div className="space-y-1.5 max-h-40 overflow-y-auto pr-1">
-                            {ex.history.map((h) => (
-                              <div key={h.id} className="flex items-baseline gap-2 text-xs">
+                          <div className="space-y-1">
+                            {ex.history.slice(0, 3).map((h) => (
+                              <div key={h.id} className="flex items-center gap-2 text-xs group">
                                 <span className="text-stone-500 font-mono shrink-0 w-12">{formatDate(h.date)}</span>
-                                <span className="text-stone-300 font-mono tabular-nums">{summarizeSets(h.sets)}</span>
+                                <span className="text-stone-300 font-mono tabular-nums flex-1 min-w-0 truncate">
+                                  {summarizeSets(h.sets)}
+                                </span>
+                                <button
+                                  onClick={() => editHistoryEntry(activeDay.id, ex.id, h.id)}
+                                  className="text-stone-600 hover:text-cyan-500 shrink-0"
+                                  aria-label={`Edit log from ${formatDate(h.date)}`}
+                                >
+                                  <Pencil className="w-3 h-3" />
+                                </button>
+                                <button
+                                  onClick={() => deleteHistoryEntry(activeDay.id, ex.id, h.id, formatDate(h.date))}
+                                  className="text-stone-600 hover:text-red-500 shrink-0"
+                                  aria-label={`Delete log from ${formatDate(h.date)}`}
+                                >
+                                  <Trash2 className="w-3 h-3" />
+                                </button>
                               </div>
                             ))}
                           </div>
                         )}
+                        {ex.history.length > 3 && (
+                          <button
+                            onClick={() => {
+                              setView('library');
+                              setPrName(ex.name);
+                            }}
+                            className="text-[11px] text-cyan-600 hover:text-cyan-400 mt-2"
+                          >
+                            See all {ex.history.length} sessions & PR →
+                          </button>
+                        )}
                       </div>
                     )}
 
-                    {/* Footer: log session */}
+                    {/* Footer: log session, which becomes an Edit button right after logging */}
                     <div className="flex items-center justify-between px-3.5 py-2.5 bg-stone-950 border-t border-stone-800">
                       <span className="text-[11px] text-stone-600">
                         {ex.history.length > 0 ? `Last logged ${formatDate(ex.history[0].date)}` : 'Not logged yet'}
@@ -1399,18 +1527,29 @@ function ExerciseTracker() {
                         <button onClick={() => clearSets(activeDay.id, ex.id)} className="text-[11px] text-stone-600 hover:text-stone-400">
                           Clear
                         </button>
-                        <button
-                          onClick={() => logSession(activeDay.id, ex.id)}
-                          className="flex items-center gap-1 text-xs font-bold px-2.5 py-1.5 rounded bg-cyan-600 text-stone-950 hover:bg-cyan-500"
-                        >
-                          {justLogged === ex.id ? (
-                            <>
-                              <Check className="w-3.5 h-3.5" /> Logged
-                            </>
-                          ) : (
-                            'Log session'
-                          )}
-                        </button>
+                        {(() => {
+                          const isEditable = ex.history.length > 0 && setsEqual(meaningfulSets(ex.sets), ex.history[0].sets);
+                          return (
+                            <button
+                              onClick={() =>
+                                isEditable ? editHistoryEntry(activeDay.id, ex.id, ex.history[0].id) : logSession(activeDay.id, ex.id)
+                              }
+                              className={`flex items-center gap-1 text-xs font-bold px-2.5 py-1.5 rounded ${
+                                isEditable
+                                  ? 'bg-stone-800 text-stone-300 hover:bg-stone-700'
+                                  : 'bg-cyan-600 text-stone-950 hover:bg-cyan-500'
+                              }`}
+                            >
+                              {isEditable ? (
+                                <>
+                                  <Pencil className="w-3.5 h-3.5" /> Edit
+                                </>
+                              ) : (
+                                'Log session'
+                              )}
+                            </button>
+                          );
+                        })()}
                       </div>
                     </div>
                       </div>
@@ -1491,6 +1630,7 @@ function ExerciseTracker() {
           name={prName}
           stats={getExerciseStats(data.days, prName)}
           archivedMatches={getArchivedMatches(data.days, prName)}
+          fullHistory={getFullHistory(data.days, prName)}
           onClose={() => setPrName(null)}
           onRestore={restoreExercise}
           onDeleteArchived={(dayId, exId, exName) => {
@@ -1500,16 +1640,20 @@ function ExerciseTracker() {
         />
       )}
 
-      {cycleFlash && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 bg-emerald-600 text-stone-950 text-sm font-bold px-4 py-2 rounded-full shadow-lg whitespace-nowrap">
-          Program cycle complete — reset for the next round
+      {toast && (
+        <div
+          className={`fixed bottom-6 left-1/2 -translate-x-1/2 z-50 text-sm font-bold px-4 py-2 rounded-full shadow-lg whitespace-nowrap ${
+            toast.tone === 'error' ? 'bg-red-600 text-stone-50' : 'bg-emerald-600 text-stone-950'
+          }`}
+        >
+          {toast.message}
         </div>
       )}
     </div>
   );
 }
 
-function PRModal({ name, stats, archivedMatches, onClose, onRestore, onDeleteArchived }) {
+function PRModal({ name, stats, archivedMatches, fullHistory, onClose, onRestore, onDeleteArchived }) {
   return (
     <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 px-4" onClick={onClose}>
       <div
@@ -1549,6 +1693,22 @@ function PRModal({ name, stats, archivedMatches, onClose, onRestore, onDeleteArc
             <p className="text-[11px] text-stone-600">
               {stats.sessions} session{stats.sessions > 1 ? 's' : ''} logged · last on {formatDate(stats.lastDate)}
             </p>
+          </div>
+        )}
+
+        {fullHistory.length > 0 && (
+          <div className="mt-4 pt-4 border-t border-stone-800">
+            <p className="flex items-center gap-1.5 text-[11px] uppercase tracking-wide text-stone-500 mb-2">
+              <HistoryIcon className="w-3 h-3" /> Full history ({fullHistory.length})
+            </p>
+            <div className="space-y-1 max-h-48 overflow-y-auto pr-1">
+              {fullHistory.map((h) => (
+                <div key={h.id} className="flex items-baseline gap-2 text-xs">
+                  <span className="text-stone-500 font-mono shrink-0 w-12">{formatDate(h.date)}</span>
+                  <span className="text-stone-300 font-mono tabular-nums">{summarizeSets(h.sets)}</span>
+                </div>
+              ))}
+            </div>
           </div>
         )}
 
@@ -1698,28 +1858,65 @@ function ExercisePicker({ library, initialValue = '', onChoose, onCancel, placeh
   );
 }
 
-function LibraryView({ library, onAdd, onRemove, onSelect, onUpdateGroup }) {
-  const [query, setQuery] = useState('');
+function LibraryView({ library, onAdd, onRemove, onSelect, onUpdateGroup, onExport, onImportParsed, onImportError }) {
+  const [newName, setNewName] = useState('');
   const [newGroup, setNewGroup] = useState(MUSCLE_GROUPS[0]);
+  const [search, setSearch] = useState('');
+  const fileInputRef = useRef(null);
 
   const submit = () => {
-    if (query.trim()) {
-      onAdd(query, newGroup);
-      setQuery('');
+    if (newName.trim()) {
+      onAdd(newName, newGroup);
+      setNewName('');
     }
   };
 
+  const handleImportClick = () => fileInputRef.current?.click();
+
+  const handleFileChosen = (e) => {
+    const file = e.target.files && e.target.files[0];
+    e.target.value = ''; // allow choosing the same file again later
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const parsed = JSON.parse(reader.result);
+        onImportParsed(parsed);
+      } catch (err) {
+        onImportError("That file doesn't look like a valid backup");
+      }
+    };
+    reader.onerror = () => onImportError("Couldn't read that file");
+    reader.readAsText(file);
+  };
+
+  const searched = search.trim()
+    ? library.filter((l) => l.name.toLowerCase().includes(search.trim().toLowerCase()))
+    : library;
+
   const grouped = MUSCLE_GROUPS.map((group) => ({
     group,
-    items: library.filter((l) => (l.muscleGroup || 'Other') === group).sort((a, b) => a.name.localeCompare(b.name)),
+    items: searched.filter((l) => (l.muscleGroup || 'Other') === group).sort((a, b) => a.name.localeCompare(b.name)),
   })).filter((g) => g.items.length > 0);
 
   return (
     <div>
+      {/* Search existing exercises */}
+      <div className="relative mb-3">
+        <Search className="w-4 h-4 text-stone-600 absolute left-2.5 top-1/2 -translate-y-1/2" />
+        <input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search your library"
+          className="w-full bg-stone-900 border border-stone-800 rounded px-3 py-2 pl-8 text-sm text-stone-100 placeholder-stone-600 outline-none focus:border-cyan-700"
+        />
+      </div>
+
+      {/* Add a new exercise */}
       <div className="flex items-center gap-1.5 mb-4">
         <input
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
+          value={newName}
+          onChange={(e) => setNewName(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === 'Enter') submit();
           }}
@@ -1744,7 +1941,7 @@ function LibraryView({ library, onAdd, onRemove, onSelect, onUpdateGroup }) {
 
       {grouped.length === 0 ? (
         <p className="text-center text-stone-600 text-sm py-8">
-          Your library is empty. Add exercises above so they're ready to pick from in the log.
+          {search.trim() ? `No exercises match "${search.trim()}".` : "Your library is empty. Add exercises above so they're ready to pick from in the log."}
         </p>
       ) : (
         <div className="space-y-4">
@@ -1795,6 +1992,29 @@ function LibraryView({ library, onAdd, onRemove, onSelect, onUpdateGroup }) {
       <p className="text-[11px] text-stone-600 mt-4">
         Tap an exercise to see your PR. Removing one here only removes it from the picker — any logs already recorded under that name stay untouched.
       </p>
+
+      {/* Backup / restore everything: sessions, program, and library */}
+      <div className="mt-6 pt-4 border-t border-stone-800">
+        <p className="text-[11px] font-bold uppercase tracking-wide text-stone-500 mb-2">Backup</p>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={onExport}
+            className="flex items-center gap-1.5 flex-1 justify-center px-3 py-2 rounded-md border border-stone-800 text-sm text-stone-300 hover:border-stone-700 hover:text-stone-100"
+          >
+            <Download className="w-3.5 h-3.5" /> Save my data
+          </button>
+          <button
+            onClick={handleImportClick}
+            className="flex items-center gap-1.5 flex-1 justify-center px-3 py-2 rounded-md border border-stone-800 text-sm text-stone-300 hover:border-stone-700 hover:text-stone-100"
+          >
+            <Upload className="w-3.5 h-3.5" /> Restore
+          </button>
+          <input ref={fileInputRef} type="file" accept="application/json" onChange={handleFileChosen} className="hidden" />
+        </div>
+        <p className="text-[11px] text-stone-600 mt-2">
+          Downloads everything — sessions, library, and program — as a file you can keep safe or move to another device.
+        </p>
+      </div>
     </div>
   );
 }
@@ -1892,9 +2112,6 @@ ReactDOM.createRoot(document.getElementById('root')).render(<ExerciseTracker />)
 </script>
 
 <script>
-  // Manually invoke Babel with the classic JSX runtime (React.createElement calls),
-  // since that's what works with a plain <script>-tag React build -- the default
-  // "automatic" runtime needs a real module bundler, which we don't have here.
   (function () {
     var source = document.getElementById('app-source').textContent;
     var output = Babel.transform(source, {
