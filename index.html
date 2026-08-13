@@ -987,6 +987,12 @@ function ExerciseTracker() {
 
   return (
     <div className="min-h-screen bg-stone-950 text-stone-100">
+      <style>{`
+        @keyframes marquee-scroll {
+          from { transform: translateX(0); }
+          to { transform: translateX(-50%); }
+        }
+      `}</style>
       <div className="max-w-2xl mx-auto px-4 pt-6 pb-24">
         {/* Header */}
         <div className="flex items-start justify-between mb-5">
@@ -1277,7 +1283,7 @@ function ExerciseTracker() {
                             >
                               <GripVertical className="w-4 h-4" />
                             </button>
-                            <h3 className="font-bold text-stone-100 text-[15px] truncate">{ex.name}</h3>
+                            <MarqueeText text={ex.name} className="font-bold text-stone-100 text-[15px]" />
                             <span
                               className={`shrink-0 text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded border ${gc.bg} ${gc.text} ${gc.border}`}
                             >
@@ -1679,7 +1685,7 @@ function ExercisePicker({ library, initialValue = '', onChoose, onCancel, placeh
                 className="w-full flex items-center gap-2 px-2 py-1 rounded text-sm text-stone-300 hover:bg-stone-800"
               >
                 <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${rowGc.dot}`} />
-                <span className="truncate flex-1 text-left">{l.name}</span>
+                <MarqueeText text={l.name} className="flex-1 min-w-0 text-left" />
                 {group === 'All' && (
                   <span className={`text-[10px] uppercase tracking-wide shrink-0 ${rowGc.text}`}>{l.muscleGroup || 'Other'}</span>
                 )}
@@ -1759,7 +1765,7 @@ function LibraryView({ library, onAdd, onRemove, onSelect, onUpdateGroup }) {
                   >
                     <span className="flex items-center gap-2 text-sm text-stone-200 min-w-0">
                       <Trophy className="w-3.5 h-3.5 text-stone-600 shrink-0" />
-                      <span className="truncate">{l.name}</span>
+                      <MarqueeText text={l.name} className="min-w-0" />
                     </span>
                     <div className="flex items-center gap-2 shrink-0" onClick={(e) => e.stopPropagation()}>
                       <select
@@ -1790,6 +1796,49 @@ function LibraryView({ library, onAdd, onRemove, onSelect, onUpdateGroup }) {
         Tap an exercise to see your PR. Removing one here only removes it from the picker — any logs already recorded under that name stay untouched.
       </p>
     </div>
+  );
+}
+
+// Slowly scrolls text sideways only when it's actually too wide for its container --
+// short names just sit still. Used anywhere an exercise name might get clipped on mobile.
+function MarqueeText({ text, className = '' }) {
+  const containerRef = useRef(null);
+  const measureRef = useRef(null);
+  const [needsScroll, setNeedsScroll] = useState(false);
+  const [duration, setDuration] = useState(8);
+
+  useEffect(() => {
+    const check = () => {
+      if (!containerRef.current || !measureRef.current) return;
+      const overflow = measureRef.current.scrollWidth > containerRef.current.clientWidth + 1;
+      setNeedsScroll(overflow);
+      if (overflow) {
+        // Slow, roughly constant speed regardless of name length (~22px/sec).
+        setDuration(Math.max(6, measureRef.current.scrollWidth / 22));
+      }
+    };
+    check();
+    window.addEventListener('resize', check);
+    return () => window.removeEventListener('resize', check);
+  }, [text]);
+
+  return (
+    <span ref={containerRef} className={`relative inline-block overflow-hidden align-bottom max-w-full ${className}`}>
+      {/* Hidden measuring copy: always static, used only to detect overflow width */}
+      <span ref={measureRef} className="invisible absolute whitespace-nowrap pointer-events-none">
+        {text}
+      </span>
+      {needsScroll ? (
+        <span className="inline-flex whitespace-nowrap" style={{ animation: `marquee-scroll ${duration}s linear infinite` }}>
+          <span className="pr-10">{text}</span>
+          <span className="pr-10" aria-hidden="true">
+            {text}
+          </span>
+        </span>
+      ) : (
+        <span className="whitespace-nowrap">{text}</span>
+      )}
+    </span>
   );
 }
 
