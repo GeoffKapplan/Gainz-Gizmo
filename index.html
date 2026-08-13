@@ -452,6 +452,7 @@ function defaultData() {
     // since the last time the cycle completed/reset. Forearms is excluded, matching the
     // desktop program (Upper 1 / Legs / Upper 2 / Arms N Shii only).
     program: { order: days.slice(0, 4).map((d) => d.id), loggedIds: [] },
+    sessionsCollapsed: false,
   };
 }
 
@@ -475,6 +476,7 @@ function normalize(parsed) {
     })),
     days,
     program: { order, loggedIds },
+    sessionsCollapsed: typeof parsed.sessionsCollapsed === 'boolean' ? parsed.sessionsCollapsed : false,
   };
 }
 
@@ -584,7 +586,6 @@ function ExerciseTracker() {
   const [swapId, setSwapId] = useState(null);
   const [addingDay, setAddingDay] = useState(false);
   const [newDayName, setNewDayName] = useState('');
-  const [sessionsCollapsed, setSessionsCollapsed] = useState(false);
   const [confirm, setConfirm] = useState(null); // { message, onConfirm } — replaces window.confirm, which sandboxed artifacts can silently block
   const [prName, setPrName] = useState(null); // exercise name currently shown in the PR modal
   const [draggingExerciseId, setDraggingExerciseId] = useState(null);
@@ -651,6 +652,31 @@ function ExerciseTracker() {
     }, 600);
     return () => clearTimeout(saveTimeout.current);
   }, [data, loaded]);
+
+  // Safety net: guarantees drag highlighting (exercise cards, Sessions tabs, Active Program
+  // chips) always clears on release, even in the rare case a specific element's own
+  // pointerup/pointercancel doesn't fire (e.g. pointer capture lost mid-drag on some mobile
+  // browsers). Runs after the element-level handlers, so it never interferes with them --
+  // it only ever resets things that should already be null/false.
+  useEffect(() => {
+    const clearAllDragState = () => {
+      exerciseDragState.current = null;
+      setDraggingExerciseId(null);
+      if (dayDragState.current) clearTimeout(dayDragState.current.timer);
+      dayDragState.current = null;
+      setDraggingDayId(null);
+      if (programDragState.current) clearTimeout(programDragState.current.timer);
+      programDragState.current = null;
+      setDraggingProgramId(null);
+      setProgramDropHover(false);
+    };
+    window.addEventListener('pointerup', clearAllDragState);
+    window.addEventListener('pointercancel', clearAllDragState);
+    return () => {
+      window.removeEventListener('pointerup', clearAllDragState);
+      window.removeEventListener('pointercancel', clearAllDragState);
+    };
+  }, []);
 
   if (!loaded || !data) {
     return (
@@ -719,18 +745,59 @@ function ExerciseTracker() {
   };
 
   // Drag-to-reorder for day tabs. Same pattern, horizontal axis.
+  // Long-press to drag: a quick tap still selects the day, and a normal swipe still scrolls
+  // the row natively (we don't block anything until the hold succeeds), so there's no
+  // permanent "handle" hitbox competing with everyday taps/scrolls.
   const handleDayPointerDown = (id) => (e) => {
-    e.preventDefault();
-    dayDragState.current = { id };
-    setDraggingDayId(id);
-    try {
-      e.currentTarget.setPointerCapture(e.pointerId);
-    } catch (_) {}
+    const pointerId = e.pointerId;
+    const el = e.currentTarget;
+    const startX = e.clientX;
+    const startY = e.clientY;
+    const timer = setTimeout(() => {
+      const st = dayDragState.current;
+      if (!st) return;
+      st.dragging = true;
+      setDraggingDayId(id);
+      justDraggedDayRef.current = true; // a completed long-press shouldn't also trigger tap-to-select
+      try {
+        el.setPointerCapture(pointerId);
+      } catch (_) {}
+    }, 500);
+    dayDragState.current = { id, startX, startY, timer, dragging: false, el, pointerId };
   };
 
   const handleDayPointerMove = (e) => {
     const st = dayDragState.current;
     if (!st) return;
+
+    if (!st.dragging) {
+      const dx = e.clientX - st.startX;
+      const dy = e.clientY - st.startY;
+      if (Math.hypot(dx, dy) > 10) {
+        if (Math.abs(dy) > Math.abs(dx)) {
+          // Mostly vertical movement -- this row only ever scrolls horizontally, so this can
+          // only mean "drag down to drop onto Active Program". Engage immediately rather than
+          // making the person hold still first, since that gesture isn't ambiguous with scrolling.
+          clearTimeout(st.timer);
+          st.dragging = true;
+          setDraggingDayId(st.id);
+          justDraggedDayRef.current = true;
+          try {
+            st.el.setPointerCapture(st.pointerId);
+          } catch (_) {}
+        } else {
+          // Mostly horizontal movement -- this is a scroll swipe, not a hold, so cancel the
+          // pending drag and let the browser scroll normally.
+          clearTimeout(st.timer);
+          dayDragState.current = null;
+          return;
+        }
+      } else {
+        return;
+      }
+    }
+
+    if (e.cancelable) e.preventDefault();
 
     // Dragging a session down over the Active Program row is a "drop to add" gesture —
     // don't also try to reorder the Sessions tabs while doing that.
@@ -758,15 +825,16 @@ function ExerciseTracker() {
     }
     if (targetIndex !== currentIndex) {
       reorderDays(currentIndex, targetIndex);
-      justDraggedDayRef.current = true;
     }
   };
 
   const handleDayPointerUp = () => {
     const st = dayDragState.current;
-    if (programDropHover && st) {
+    if (st && !st.dragging) {
+      clearTimeout(st.timer); // released before the hold fired -- just a normal tap
+    }
+    if (st && st.dragging && programDropHover) {
       addToProgram(st.id);
-      justDraggedDayRef.current = true; // suppress the tab-select click this drag would otherwise trigger
     }
     setProgramDropHover(false);
     dayDragState.current = null;
@@ -780,8 +848,14 @@ function ExerciseTracker() {
 
   // Removing here only changes the program's rotation membership — the day itself,
   // its exercises, and its history are untouched.
-  const removeFromProgram = (dayId) => {
-    setData((prev) => ({ ...prev, program: { ...prev.program, order: prev.program.order.filter((id) => id !== dayId) } }));
+  const removeFromProgram = (dayId, dayName) => {
+    askConfirm(
+      `Remove "${dayName}" from the active program? You can drag it back in from Sessions anytime.`,
+      () => {
+        setData((prev) => ({ ...prev, program: { ...prev.program, order: prev.program.order.filter((id) => id !== dayId) } }));
+      },
+      'Remove'
+    );
   };
 
   // Adding here only happens by dragging (or the Sessions tab won't add-by-click) a day down
@@ -794,20 +868,40 @@ function ExerciseTracker() {
     );
   };
 
-  // Drag-to-reorder within the Active Program row (adding/removing membership happens
-  // elsewhere — via the Sessions-row drag-down, or the × button).
+  // Long-press to drag within the Active Program row -- same pattern as Sessions: a quick tap
+  // still selects the day, and a swipe still scrolls the row, only a sustained hold drags.
   const handleProgramPointerDown = (id) => (e) => {
-    e.preventDefault();
-    programDragState.current = { id };
-    setDraggingProgramId(id);
-    try {
-      e.currentTarget.setPointerCapture(e.pointerId);
-    } catch (_) {}
+    const pointerId = e.pointerId;
+    const el = e.currentTarget;
+    const startX = e.clientX;
+    const startY = e.clientY;
+    const timer = setTimeout(() => {
+      const st = programDragState.current;
+      if (!st) return;
+      st.dragging = true;
+      setDraggingProgramId(id);
+      justDraggedProgramRef.current = true; // a completed long-press shouldn't also trigger tap-to-select
+      try {
+        el.setPointerCapture(pointerId);
+      } catch (_) {}
+    }, 500);
+    programDragState.current = { id, startX, startY, timer, dragging: false };
   };
 
   const handleProgramPointerMove = (e) => {
     const st = programDragState.current;
-    if (!st || !programListRef.current) return;
+    if (!st) return;
+
+    if (!st.dragging) {
+      if (Math.hypot(e.clientX - st.startX, e.clientY - st.startY) > 10) {
+        clearTimeout(st.timer);
+        programDragState.current = null;
+      }
+      return;
+    }
+
+    if (e.cancelable) e.preventDefault();
+    if (!programListRef.current) return;
     const els = Array.from(programListRef.current.querySelectorAll('[data-sort-id]'));
     const currentIndex = data.program.order.findIndex((id) => id === st.id);
     if (currentIndex === -1) return;
@@ -821,11 +915,14 @@ function ExerciseTracker() {
     }
     if (targetIndex !== currentIndex) {
       setData((prev) => ({ ...prev, program: { ...prev.program, order: moveItem(prev.program.order, currentIndex, targetIndex) } }));
-      justDraggedProgramRef.current = true;
     }
   };
 
   const handleProgramPointerUp = () => {
+    const st = programDragState.current;
+    if (st && !st.dragging) {
+      clearTimeout(st.timer); // released before the hold fired -- just a normal tap
+    }
     programDragState.current = null;
     setDraggingProgramId(null);
     setTimeout(() => {
@@ -1136,45 +1233,34 @@ function ExerciseTracker() {
           <>
             {/* Day tabs */}
             <button
-              onClick={() => setSessionsCollapsed((v) => !v)}
+              onClick={() => setData((prev) => ({ ...prev, sessionsCollapsed: !prev.sessionsCollapsed }))}
               className="flex items-center gap-1 text-[11px] font-bold uppercase tracking-wide text-stone-500 hover:text-stone-300 mb-1.5"
             >
-              {sessionsCollapsed ? <ChevronDown className="w-3 h-3" /> : <ChevronUp className="w-3 h-3" />}
+              {data.sessionsCollapsed ? <ChevronDown className="w-3 h-3" /> : <ChevronUp className="w-3 h-3" />}
               Sessions
             </button>
-            {!sessionsCollapsed && (
+            {!data.sessionsCollapsed && (
             <div ref={dayTabsRef} className="flex items-center gap-1.5 overflow-x-auto pb-1 mb-5 -mx-1 px-1">
               {data.days.map((d) => (
-                <div
+                <button
                   key={d.id}
                   data-sort-id={d.id}
-                  className={`shrink-0 flex items-center rounded-md text-sm font-bold uppercase tracking-wide transition-colors ${
+                  onPointerDown={handleDayPointerDown(d.id)}
+                  onPointerMove={handleDayPointerMove}
+                  onPointerUp={handleDayPointerUp}
+                  onPointerCancel={handleDayPointerUp}
+                  onClick={() => {
+                    if (justDraggedDayRef.current) return;
+                    setActiveDayId(d.id);
+                  }}
+                  className={`shrink-0 px-3.5 py-2 rounded-md text-sm font-bold uppercase tracking-wide transition-all select-none ${
                     d.id === activeDayId
                       ? 'bg-cyan-600 text-stone-950'
                       : 'bg-stone-900 text-stone-400 hover:bg-stone-800 hover:text-stone-200'
-                  } ${draggingDayId === d.id ? 'opacity-60 ring-2 ring-cyan-400' : ''}`}
+                  } ${draggingDayId === d.id ? 'opacity-70 ring-2 ring-cyan-400 scale-105' : ''}`}
                 >
-                  <button
-                    onPointerDown={handleDayPointerDown(d.id)}
-                    onPointerMove={handleDayPointerMove}
-                    onPointerUp={handleDayPointerUp}
-                    onPointerCancel={handleDayPointerUp}
-                    style={{ touchAction: 'none' }}
-                    className="pl-2 pr-0.5 py-2 cursor-grab active:cursor-grabbing opacity-70"
-                    aria-label={`Reorder ${d.name}`}
-                  >
-                    <GripVertical className="w-3.5 h-3.5" />
-                  </button>
-                  <button
-                    onClick={() => {
-                      if (justDraggedDayRef.current) return;
-                      setActiveDayId(d.id);
-                    }}
-                    className="pr-3.5 pl-1 py-2"
-                  >
-                    {d.name}
-                  </button>
-                </div>
+                  {d.name}
+                </button>
               ))}
               {addingDay ? (
                 <div className="shrink-0 flex items-center gap-1 bg-stone-900 rounded-md px-2 py-1">
@@ -1246,29 +1332,22 @@ function ExerciseTracker() {
                       <div
                         key={dayId}
                         data-sort-id={dayId}
-                        className={`shrink-0 flex items-center rounded-md text-sm font-bold uppercase tracking-wide border transition-colors ${
+                        className={`shrink-0 flex items-center rounded-md text-sm font-bold uppercase tracking-wide border transition-all select-none ${
                           complete
                             ? 'bg-emerald-500/10 border-emerald-500/40 text-emerald-400'
                             : 'bg-stone-900 border-stone-800 text-stone-400'
-                        } ${draggingProgramId === dayId ? 'opacity-60 ring-2 ring-cyan-400' : ''}`}
+                        } ${draggingProgramId === dayId ? 'opacity-70 ring-2 ring-cyan-400 scale-105' : ''}`}
                       >
                         <button
                           onPointerDown={handleProgramPointerDown(dayId)}
                           onPointerMove={handleProgramPointerMove}
                           onPointerUp={handleProgramPointerUp}
                           onPointerCancel={handleProgramPointerUp}
-                          style={{ touchAction: 'none' }}
-                          className="pl-2 pr-0.5 py-2 cursor-grab active:cursor-grabbing opacity-70"
-                          aria-label={`Reorder ${day.name} in program`}
-                        >
-                          <GripVertical className="w-3.5 h-3.5" />
-                        </button>
-                        <button
                           onClick={() => {
                             if (justDraggedProgramRef.current) return;
                             setActiveDayId(dayId);
                           }}
-                          className="pl-1 pr-1 py-2 flex items-center gap-1.5"
+                          className="pl-3 pr-1 py-2 flex items-center gap-1.5"
                         >
                           {complete && <Check className="w-3.5 h-3.5" />}
                           {day.name}
@@ -1276,7 +1355,7 @@ function ExerciseTracker() {
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
-                            removeFromProgram(dayId);
+                            removeFromProgram(dayId, day.name);
                           }}
                           className="pl-1 pr-2 py-2 opacity-60 hover:opacity-100"
                           aria-label={`Remove ${day.name} from program`}
@@ -1613,7 +1692,7 @@ function ExerciseTracker() {
                   setConfirm(null);
                 }}
                 className={`px-3 py-1.5 rounded text-sm font-bold text-stone-950 ${
-                  confirm.confirmLabel === 'Archive' || confirm.confirmLabel === 'Reset'
+                  confirm.confirmLabel === 'Archive' || confirm.confirmLabel === 'Reset' || confirm.confirmLabel === 'Remove'
                     ? 'bg-cyan-600 hover:bg-cyan-500'
                     : 'bg-red-600 hover:bg-red-500'
                 }`}
