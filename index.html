@@ -1,0 +1,1847 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
+<title>Gainz Gizmo</title>
+
+<!-- Makes this behave like a standalone app when added to an iOS home screen -->
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="Gainz Gizmo" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="theme-color" content="#0c0a09" />
+
+<!-- Tailwind (JIT, compiles in-browser) -->
+<script src="https://cdn.tailwindcss.com"></script>
+
+<!-- React -->
+<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+
+<!-- Babel standalone: lets this file use JSX directly in the browser, no build step -->
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+<style>
+  html, body { background: #0c0a09; margin: 0; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script>
+  // Storage shim: gives window.storage.get/set the same shape the app already expects,
+  // backed by this browser's localStorage instead of Claude's artifact storage API.
+  // Personal to this browser/device only -- it won't sync across devices the way the
+  // Claude-hosted version did.
+  window.storage = {
+    async get(key) {
+      try {
+        var raw = localStorage.getItem(key);
+        return raw === null ? null : { key: key, value: raw };
+      } catch (e) {
+        return null;
+      }
+    },
+    async set(key, value) {
+      try {
+        localStorage.setItem(key, value);
+        return { key: key, value: value };
+      } catch (e) {
+        return null;
+      }
+    },
+    async delete(key) {
+      try {
+        localStorage.removeItem(key);
+        return { key: key, deleted: true };
+      } catch (e) {
+        return null;
+      }
+    },
+    async list(prefix) {
+      try {
+        var keys = Object.keys(localStorage).filter(function (k) {
+          return !prefix || k.indexOf(prefix) === 0;
+        });
+        return { keys: keys };
+      } catch (e) {
+        return null;
+      }
+    },
+  };
+</script>
+
+<!-- Raw JSX source, held as inert text so the browser doesn't try to run it directly -->
+<script type="text/plain" id="app-source">
+// Minimal inline icon set (Lucide-compatible paths) so this file has zero runtime
+// dependency on an icon package.
+function Icon({ children, className }) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="24"
+      height="24"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+    >
+      {children}
+    </svg>
+  );
+}
+
+const RefreshCw = (props) => (
+  <Icon {...props}>
+    <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" />
+    <path d="M21 3v5h-5" />
+    <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16" />
+    <path d="M8 16H3v5" />
+  </Icon>
+);
+
+const StickyNote = (props) => (
+  <Icon {...props}>
+    <path d="M21 9a2.4 2.4 0 0 0-.706-1.706l-3.588-3.588A2.4 2.4 0 0 0 15 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2z" />
+    <path d="M15 3v5a1 1 0 0 0 1 1h5" />
+  </Icon>
+);
+
+const HistoryIcon = (props) => (
+  <Icon {...props}>
+    <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+    <path d="M3 3v5h5" />
+    <path d="M12 7v5l4 2" />
+  </Icon>
+);
+
+const Plus = (props) => (
+  <Icon {...props}>
+    <path d="M5 12h14" />
+    <path d="M12 5v14" />
+  </Icon>
+);
+
+const X = (props) => (
+  <Icon {...props}>
+    <path d="M18 6 6 18" />
+    <path d="m6 6 12 12" />
+  </Icon>
+);
+
+const Trash2 = (props) => (
+  <Icon {...props}>
+    <path d="M10 11v6" />
+    <path d="M14 11v6" />
+    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" />
+    <path d="M3 6h18" />
+    <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+  </Icon>
+);
+
+const Check = (props) => (
+  <Icon {...props}>
+    <path d="M20 6 9 17l-5-5" />
+  </Icon>
+);
+
+const Loader2 = (props) => (
+  <Icon {...props}>
+    <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+  </Icon>
+);
+
+const Pencil = (props) => (
+  <Icon {...props}>
+    <path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z" />
+    <path d="m15 5 4 4" />
+  </Icon>
+);
+
+const CircleAlert = (props) => (
+  <Icon {...props}>
+    <circle cx="12" cy="12" r="10" />
+    <line x1="12" x2="12" y1="8" y2="12" />
+    <line x1="12" x2="12.01" y1="16" y2="16" />
+  </Icon>
+);
+
+const ArchiveIcon = (props) => (
+  <Icon {...props}>
+    <rect width="20" height="5" x="2" y="3" rx="1" />
+    <path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8" />
+    <path d="M10 12h4" />
+  </Icon>
+);
+
+const Undo2 = (props) => (
+  <Icon {...props}>
+    <path d="M9 14 4 9l5-5" />
+    <path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5a5.5 5.5 0 0 1-5.5 5.5H11" />
+  </Icon>
+);
+
+const LibraryIcon = (props) => (
+  <Icon {...props}>
+    <path d="m16 6 4 14" />
+    <path d="M12 6v14" />
+    <path d="M8 8v12" />
+    <path d="M4 4v16" />
+  </Icon>
+);
+
+const ListChecks = (props) => (
+  <Icon {...props}>
+    <path d="M13 5h8" />
+    <path d="M13 12h8" />
+    <path d="M13 19h8" />
+    <path d="m3 17 2 2 4-4" />
+    <path d="m3 7 2 2 4-4" />
+  </Icon>
+);
+
+const Trophy = (props) => (
+  <Icon {...props}>
+    <path d="M10 14.66V17a1 1 0 0 1-1 1 2 2 0 0 0-2 2v2" />
+    <path d="M14 14.66V17a1 1 0 0 0 1 1 2 2 0 0 1 2 2v2" />
+    <path d="M17.916 10H19.5A2.5 2.5 0 0 0 22 7.5V5a1 1 0 0 0-1-1h-3" />
+    <path d="M4 22h16" />
+    <path d="M6 9a6 6 0 0 0 12 0V3a1 1 0 0 0-1-1H7a1 1 0 0 0-1 1z" />
+    <path d="M6.084 10H4.5A2.5 2.5 0 0 1 2 7.5V5a1 1 0 0 1 1-1h3" />
+  </Icon>
+);
+
+const GripVertical = (props) => (
+  <Icon {...props}>
+    <circle cx="9" cy="12" r="1" />
+    <circle cx="9" cy="5" r="1" />
+    <circle cx="9" cy="19" r="1" />
+    <circle cx="15" cy="12" r="1" />
+    <circle cx="15" cy="5" r="1" />
+    <circle cx="15" cy="19" r="1" />
+  </Icon>
+);
+
+const ChevronDown = (props) => (
+  <Icon {...props}>
+    <path d="m6 9 6 6 6-6" />
+  </Icon>
+);
+
+const ChevronUp = (props) => (
+  <Icon {...props}>
+    <path d="m18 15-6-6-6 6" />
+  </Icon>
+);
+const { useState, useEffect, useRef } = React;
+
+const STORAGE_KEY = 'exercise-tracker-data-v1';
+
+function genId(prefix) {
+  return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
+}
+
+// Returns a new array with the item at `from` moved to `to`.
+function moveItem(arr, from, to) {
+  if (from === to || from < 0 || to < 0 || from >= arr.length || to >= arr.length) return arr;
+  const copy = arr.slice();
+  const [item] = copy.splice(from, 1);
+  copy.splice(to, 0, item);
+  return copy;
+}
+
+function mkExercise(name) {
+  return {
+    id: genId('ex'),
+    name,
+    notes: '',
+    sets: [{ weight: '', reps: '' }],
+    history: [],
+  };
+}
+
+const MUSCLE_GROUPS = [
+  'Chest', 'Back', 'Shoulders', 'Biceps', 'Triceps', 'Forearms', 'Quads', 'Hamstrings', 'Glutes', 'Core', 'Other',
+];
+
+// One distinct color per muscle group, reused for badges, borders, group chips, and dots.
+const GROUP_COLORS = {
+  Chest: { text: 'text-red-400', bg: 'bg-red-500/10', border: 'border-red-500/40', left: 'border-l-red-500', dot: 'bg-red-500' },
+  Back: { text: 'text-blue-400', bg: 'bg-blue-500/10', border: 'border-blue-500/40', left: 'border-l-blue-500', dot: 'bg-blue-500' },
+  Shoulders: { text: 'text-violet-400', bg: 'bg-violet-500/10', border: 'border-violet-500/40', left: 'border-l-violet-500', dot: 'bg-violet-500' },
+  Biceps: { text: 'text-emerald-400', bg: 'bg-emerald-500/10', border: 'border-emerald-500/40', left: 'border-l-emerald-500', dot: 'bg-emerald-500' },
+  Triceps: { text: 'text-teal-400', bg: 'bg-teal-500/10', border: 'border-teal-500/40', left: 'border-l-teal-500', dot: 'bg-teal-500' },
+  Forearms: { text: 'text-lime-400', bg: 'bg-lime-500/10', border: 'border-lime-500/40', left: 'border-l-lime-500', dot: 'bg-lime-500' },
+  Quads: { text: 'text-orange-400', bg: 'bg-orange-500/10', border: 'border-orange-500/40', left: 'border-l-orange-500', dot: 'bg-orange-500' },
+  Hamstrings: { text: 'text-amber-400', bg: 'bg-amber-500/10', border: 'border-amber-500/40', left: 'border-l-amber-500', dot: 'bg-amber-500' },
+  Glutes: { text: 'text-pink-400', bg: 'bg-pink-500/10', border: 'border-pink-500/40', left: 'border-l-pink-500', dot: 'bg-pink-500' },
+  Core: { text: 'text-sky-400', bg: 'bg-sky-500/10', border: 'border-sky-500/40', left: 'border-l-sky-500', dot: 'bg-sky-500' },
+  Other: { text: 'text-stone-400', bg: 'bg-stone-500/10', border: 'border-stone-500/40', left: 'border-l-stone-500', dot: 'bg-stone-500' },
+};
+
+function groupColor(group) {
+  return GROUP_COLORS[group] || GROUP_COLORS.Other;
+}
+
+function defaultData() {
+  const libraryNames = [
+    // Chest
+    ['Cable Flye', 'Chest'],
+    ['Dips', 'Chest'],
+    ['Dumbbell Flye', 'Chest'],
+    ['Flat Bench', 'Chest'],
+    ['Incline Bench', 'Chest'],
+    ['Incline Dumbbell Press', 'Chest'],
+    ['Incline Smith Machine', 'Chest'],
+    ['Pec Deck', 'Chest'],
+    // Back
+    ['Cable Row', 'Back'],
+    ['Chin-Up', 'Back'],
+    ['Dumbbell Pullover', 'Back'],
+    ['Hammer Machine Row (High)', 'Back'],
+    ['Hammer Machine Row (Low)', 'Back'],
+    ['Inverted Row', 'Back'],
+    ['Pull-Up (Neutral Grip)', 'Back'],
+    ['Pull-Up (Overhand Grip)', 'Back'],
+    // Shoulders
+    ['Behind-the-back Cable Lateral Raise (Cuff)', 'Shoulders'],
+    ['Dumbbell Lateral Raise', 'Shoulders'],
+    ['Dumbbell Lean-in Lateral Raise', 'Shoulders'],
+    ['FreeMotion Rear Delt Flye', 'Shoulders'],
+    ['Machine Lateral Raise', 'Shoulders'],
+    ['Seated Dumbbell Press', 'Shoulders'],
+    ['Seated OHP', 'Shoulders'],
+    ['Standing OHP', 'Shoulders'],
+    ['Upright Row', 'Shoulders'],
+    // Biceps
+    ['Bayesain Curl', 'Biceps'],
+    ['EZ-bar Preacher Curl', 'Biceps'],
+    ['Hammer Preacher Curl', 'Biceps'],
+    ['Incline Curl', 'Biceps'],
+    ['Machine Bicep Curl', 'Biceps'],
+    // Triceps
+    ['Barbell Skullcrusher', 'Triceps'],
+    ['Overhead Cable Tricep Extension', 'Triceps'],
+    ['Seated Overhead EZ-bar Tricep Extension', 'Triceps'],
+    ['Tricep Pushdown', 'Triceps'],
+    // Forearms
+    ['Cable Extensors', 'Forearms'],
+    ['Cable Flexors', 'Forearms'],
+    ['Deadhang', 'Forearms'],
+    ['Dumbbell Extensors', 'Forearms'],
+    ['Dumbbell Flexors', 'Forearms'],
+    ['Grip Crusher', 'Forearms'],
+    ['Single Arm Deadhang', 'Forearms'],
+    ['Weighted Stick Pronation + Supination', 'Forearms'],
+    ['Weighted Stick Radial Deviation', 'Forearms'],
+    ['Weighted Stick Ulnar Deviation', 'Forearms'],
+    // Quads
+    ['Quad Extension', 'Quads'],
+    ['Reverse Nordic', 'Quads'],
+    ['Sissy Squat', 'Quads'],
+    // Hamstrings
+    ['Jefferson Curl', 'Hamstrings'],
+    ['Lying Hamstring Curl', 'Hamstrings'],
+    ['Nordic Curl', 'Hamstrings'],
+    ['Seated Hamstring Curl', 'Hamstrings'],
+    // Glutes
+    ['Cossack Squat', 'Glutes'],
+    ['Pistol Squat', 'Glutes'],
+    ['Step-Up', 'Glutes'],
+    ['Zercher Squat', 'Glutes'],
+    // Core
+    ['Decline Sit-Up', 'Core'],
+    ['Dragon Flag', 'Core'],
+    ['Gar Hammer', 'Core'],
+    ['Hanging Leg Raise', 'Core'],
+  ];
+  const days = [
+    {
+      id: genId('day'),
+      name: 'Upper 1',
+      exercises: [
+        mkExercise('Incline Bench'),
+        mkExercise('Pull-Up (Neutral Grip)'),
+        mkExercise('Cable Flye'),
+        mkExercise('Hammer Machine Row (Low)'),
+        mkExercise('Behind-the-back Cable Lateral Raise (Cuff)'),
+      ],
+      archived: [],
+    },
+    {
+      id: genId('day'),
+      name: 'Legs',
+      exercises: [
+        mkExercise('Jefferson Curl'),
+        mkExercise('Cossack Squat'),
+        mkExercise('Sissy Squat'),
+        mkExercise('Decline Sit-Up'),
+      ],
+      archived: [],
+    },
+    {
+      id: genId('day'),
+      name: 'Upper 2',
+      exercises: [
+        mkExercise('Standing OHP'),
+        mkExercise('Chin-Up'),
+        mkExercise('Dips'),
+        mkExercise('Dumbbell Pullover'),
+        mkExercise('Dumbbell Lean-in Lateral Raise'),
+      ],
+      archived: [],
+    },
+    {
+      id: genId('day'),
+      name: 'Arms N Shii',
+      exercises: [
+        mkExercise('Incline Curl'),
+        mkExercise('Barbell Skullcrusher'),
+        mkExercise('Hammer Preacher Curl'),
+        mkExercise('Dragon Flag'),
+        mkExercise('Dumbbell Flexors'),
+        mkExercise('Dumbbell Extensors'),
+      ],
+      archived: [],
+    },
+    {
+      id: genId('day'),
+      name: 'Forearms',
+      exercises: [
+        mkExercise('Weighted Stick Pronation + Supination'),
+        mkExercise('Weighted Stick Ulnar Deviation'),
+        mkExercise('Weighted Stick Radial Deviation'),
+        mkExercise('Grip Crusher'),
+        mkExercise('Deadhang'),
+      ],
+      archived: [],
+    },
+  ];
+  return {
+    library: libraryNames.map(([name, muscleGroup]) => ({ id: genId('lib'), name, muscleGroup })),
+    days,
+    // The active program: cycle order (day ids) plus which exercise ids have been logged
+    // since the last time the cycle completed/reset. Forearms is excluded, matching the
+    // desktop program (Upper 1 / Legs / Upper 2 / Arms N Shii only).
+    program: { order: days.slice(0, 4).map((d) => d.id), loggedIds: [] },
+  };
+}
+
+// Fills in fields that may be missing from data saved by an earlier version of the app,
+// re-buckets any muscle group that no longer exists (e.g. the old 'Arms'/'Legs') into 'Other',
+// and drops any stale day ids from the active-program order (e.g. a deleted day).
+function normalize(parsed) {
+  const days = (parsed.days || []).map((d) => ({ ...d, archived: d.archived || [] }));
+  const dayIds = days.map((d) => d.id);
+  // Saves from before the program feature existed have no `program` field at all — for those,
+  // default the order to every current day (one-time migration). Once a program field exists,
+  // trust it as-is: a day missing from it was deliberately removed and should stay removed,
+  // not get silently re-added just because it still exists in `days`.
+  const savedOrder = parsed.program ? parsed.program.order || [] : dayIds;
+  const order = savedOrder.filter((id) => dayIds.includes(id));
+  const loggedIds = (parsed.program && parsed.program.loggedIds) || [];
+  return {
+    library: (parsed.library || []).map((l) => ({
+      ...l,
+      muscleGroup: MUSCLE_GROUPS.includes(l.muscleGroup) ? l.muscleGroup : 'Other',
+    })),
+    days,
+    program: { order, loggedIds },
+  };
+}
+
+// A day counts as "done" for the current cycle once every exercise in it has been logged.
+function dayIsComplete(day, loggedIds) {
+  return day.exercises.length > 0 && day.exercises.every((ex) => loggedIds.includes(ex.id));
+}
+
+function formatDate(iso) {
+  const d = new Date(iso);
+  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}
+
+function summarizeSets(sets) {
+  return sets
+    .filter((s) => s.weight !== '' || s.reps !== '')
+    .map((s) => `${s.weight || '—'}×${s.reps || '—'}`)
+    .join(', ');
+}
+
+// Scans every day (active exercises + archived ones) for logged sets under this exact name
+// and pulls out the heaviest set and the best estimated 1-rep max (Epley formula).
+function getExerciseStats(days, name) {
+  const lower = name.toLowerCase();
+  let sessions = 0;
+  let lastDate = null;
+  let bestWeightSet = null;
+  let bestEst1RM = null;
+
+  const consider = (ex) => {
+    if (ex.name.toLowerCase() !== lower) return;
+    ex.history.forEach((h) => {
+      sessions += 1;
+      if (!lastDate || new Date(h.date) > new Date(lastDate)) lastDate = h.date;
+      h.sets.forEach((s) => {
+        const w = parseFloat(s.weight);
+        const r = parseFloat(s.reps);
+        if (!isNaN(w) && !isNaN(r) && r > 0) {
+          if (!bestWeightSet || w > bestWeightSet.weight || (w === bestWeightSet.weight && r > bestWeightSet.reps)) {
+            bestWeightSet = { weight: w, reps: r, date: h.date };
+          }
+          const est = w * (1 + r / 30);
+          if (!bestEst1RM || est > bestEst1RM.value) {
+            bestEst1RM = { value: est, weight: w, reps: r, date: h.date };
+          }
+        }
+      });
+    });
+  };
+
+  days.forEach((d) => {
+    d.exercises.forEach(consider);
+    (d.archived || []).forEach(consider);
+  });
+
+  return { sessions, lastDate, bestWeightSet, bestEst1RM };
+}
+
+// Finds every archived exercise (across all days) that matches this library name.
+function getArchivedMatches(days, name) {
+  const lower = name.toLowerCase();
+  const matches = [];
+  days.forEach((d) => {
+    (d.archived || []).forEach((ex) => {
+      if (ex.name.toLowerCase() === lower) matches.push({ dayId: d.id, dayName: d.name, ex });
+    });
+  });
+  return matches;
+}
+
+function ExerciseTracker() {
+  const [data, setData] = useState(null);
+  const [view, setView] = useState('log'); // 'log' | 'library'
+  const [activeDayId, setActiveDayId] = useState(null);
+  const [loaded, setLoaded] = useState(false);
+  const [saveState, setSaveState] = useState('idle');
+  const [openNotes, setOpenNotes] = useState({});
+  const [openHistory, setOpenHistory] = useState({});
+  const [editingDayId, setEditingDayId] = useState(null);
+  const [editingDayName, setEditingDayName] = useState('');
+  const [addingExerciseFor, setAddingExerciseFor] = useState(null);
+  const [swapId, setSwapId] = useState(null);
+  const [addingDay, setAddingDay] = useState(false);
+  const [newDayName, setNewDayName] = useState('');
+  const [justLogged, setJustLogged] = useState(null);
+  const [sessionsCollapsed, setSessionsCollapsed] = useState(false);
+  const [confirm, setConfirm] = useState(null); // { message, onConfirm } — replaces window.confirm, which sandboxed artifacts can silently block
+  const [prName, setPrName] = useState(null); // exercise name currently shown in the PR modal
+  const [draggingExerciseId, setDraggingExerciseId] = useState(null);
+  const [draggingDayId, setDraggingDayId] = useState(null);
+  const [draggingProgramId, setDraggingProgramId] = useState(null);
+  const [programDropHover, setProgramDropHover] = useState(false); // true while dragging a Sessions tab over the Active Program row
+  const [cycleFlash, setCycleFlash] = useState(false);
+  const exerciseListRef = useRef(null);
+  const exerciseDragState = useRef(null);
+  const dayTabsRef = useRef(null);
+  const dayDragState = useRef(null);
+  const justDraggedDayRef = useRef(false); // suppresses the tab's click-to-select right after a drag
+  const programListRef = useRef(null);
+  const programDragState = useRef(null);
+  const justDraggedProgramRef = useRef(false); // suppresses the program chip's click-to-select right after a drag
+  const saveTimeout = useRef(null);
+
+  const askConfirm = (message, onConfirm, confirmLabel = 'Delete') => setConfirm({ message, onConfirm, confirmLabel });
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const result = await window.storage.get(STORAGE_KEY, false);
+        if (cancelled) return;
+        if (result && result.value) {
+          const parsed = normalize(JSON.parse(result.value));
+          setData(parsed);
+          setActiveDayId(parsed.days[0]?.id ?? null);
+        } else {
+          const d = defaultData();
+          setData(d);
+          setActiveDayId(d.days[0].id);
+        }
+      } catch (e) {
+        const d = defaultData();
+        setData(d);
+        setActiveDayId(d.days[0].id);
+      } finally {
+        if (!cancelled) setLoaded(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!loaded || !data) return;
+    setSaveState('saving');
+    if (saveTimeout.current) clearTimeout(saveTimeout.current);
+    saveTimeout.current = setTimeout(async () => {
+      try {
+        const result = await window.storage.set(STORAGE_KEY, JSON.stringify(data), false);
+        setSaveState(result ? 'saved' : 'error');
+      } catch (e) {
+        setSaveState('error');
+      }
+    }, 600);
+    return () => clearTimeout(saveTimeout.current);
+  }, [data, loaded]);
+
+  if (!loaded || !data) {
+    return (
+      <div className="min-h-screen bg-stone-950 flex items-center justify-center">
+        <div className="flex items-center gap-2 text-stone-400">
+          <Loader2 className="w-5 h-5 animate-spin" />
+          <span className="text-sm">Loading your log…</span>
+        </div>
+      </div>
+    );
+  }
+
+  const activeDay = data.days.find((d) => d.id === activeDayId) || data.days[0];
+
+  const groupForName = (name) => {
+    const match = data.library.find((l) => l.name.toLowerCase() === name.toLowerCase());
+    return match?.muscleGroup || 'Other';
+  };
+
+  const updateDay = (dayId, fn) => {
+    setData((prev) => ({
+      ...prev,
+      days: prev.days.map((d) => (d.id === dayId ? fn(d) : d)),
+    }));
+  };
+
+  const reorderExercises = (dayId, fromIndex, toIndex) => {
+    updateDay(dayId, (d) => ({ ...d, exercises: moveItem(d.exercises, fromIndex, toIndex) }));
+  };
+
+  const reorderDays = (fromIndex, toIndex) => {
+    setData((prev) => ({ ...prev, days: moveItem(prev.days, fromIndex, toIndex) }));
+  };
+
+  // Drag-to-reorder for exercises within the active day. The handle captures the pointer on
+  // press, so move/up events keep firing on it even as the finger/cursor travels elsewhere.
+  const handleExercisePointerDown = (id) => (e) => {
+    e.preventDefault();
+    exerciseDragState.current = { id };
+    setDraggingExerciseId(id);
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch (_) {}
+  };
+
+  const handleExercisePointerMove = (e) => {
+    const st = exerciseDragState.current;
+    if (!st || !exerciseListRef.current || !activeDay) return;
+    const els = Array.from(exerciseListRef.current.querySelectorAll('[data-sort-id]'));
+    const currentIndex = activeDay.exercises.findIndex((ex) => ex.id === st.id);
+    if (currentIndex === -1) return;
+    let targetIndex = els.length - 1;
+    for (let i = 0; i < els.length; i++) {
+      const rect = els[i].getBoundingClientRect();
+      if (e.clientY < rect.top + rect.height / 2) {
+        targetIndex = i;
+        break;
+      }
+    }
+    if (targetIndex !== currentIndex) reorderExercises(activeDay.id, currentIndex, targetIndex);
+  };
+
+  const handleExercisePointerUp = () => {
+    exerciseDragState.current = null;
+    setDraggingExerciseId(null);
+  };
+
+  // Drag-to-reorder for day tabs. Same pattern, horizontal axis.
+  const handleDayPointerDown = (id) => (e) => {
+    e.preventDefault();
+    dayDragState.current = { id };
+    setDraggingDayId(id);
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch (_) {}
+  };
+
+  const handleDayPointerMove = (e) => {
+    const st = dayDragState.current;
+    if (!st) return;
+
+    // Dragging a session down over the Active Program row is a "drop to add" gesture —
+    // don't also try to reorder the Sessions tabs while doing that.
+    if (programListRef.current) {
+      const rect = programListRef.current.getBoundingClientRect();
+      const overProgram = e.clientY >= rect.top && e.clientY <= rect.bottom;
+      if (overProgram) {
+        setProgramDropHover(true);
+        return;
+      }
+      if (programDropHover) setProgramDropHover(false);
+    }
+
+    if (!dayTabsRef.current) return;
+    const els = Array.from(dayTabsRef.current.querySelectorAll('[data-sort-id]'));
+    const currentIndex = data.days.findIndex((d) => d.id === st.id);
+    if (currentIndex === -1) return;
+    let targetIndex = els.length - 1;
+    for (let i = 0; i < els.length; i++) {
+      const rect = els[i].getBoundingClientRect();
+      if (e.clientX < rect.left + rect.width / 2) {
+        targetIndex = i;
+        break;
+      }
+    }
+    if (targetIndex !== currentIndex) {
+      reorderDays(currentIndex, targetIndex);
+      justDraggedDayRef.current = true;
+    }
+  };
+
+  const handleDayPointerUp = () => {
+    const st = dayDragState.current;
+    if (programDropHover && st) {
+      addToProgram(st.id);
+      justDraggedDayRef.current = true; // suppress the tab-select click this drag would otherwise trigger
+    }
+    setProgramDropHover(false);
+    dayDragState.current = null;
+    setDraggingDayId(null);
+    // Give the browser's click event (which fires right after pointerup) a chance to see the
+    // flag before it resets, so a drag doesn't also select the day it was dropped on.
+    setTimeout(() => {
+      justDraggedDayRef.current = false;
+    }, 50);
+  };
+
+  // Removing here only changes the program's rotation membership — the day itself,
+  // its exercises, and its history are untouched.
+  const removeFromProgram = (dayId) => {
+    setData((prev) => ({ ...prev, program: { ...prev.program, order: prev.program.order.filter((id) => id !== dayId) } }));
+  };
+
+  // Adding here only happens by dragging (or the Sessions tab won't add-by-click) a day down
+  // from the Sessions row above — see handleDayPointerUp.
+  const addToProgram = (dayId) => {
+    setData((prev) =>
+      prev.program.order.includes(dayId)
+        ? prev
+        : { ...prev, program: { ...prev.program, order: [...prev.program.order, dayId] } }
+    );
+  };
+
+  // Drag-to-reorder within the Active Program row (adding/removing membership happens
+  // elsewhere — via the Sessions-row drag-down, or the × button).
+  const handleProgramPointerDown = (id) => (e) => {
+    e.preventDefault();
+    programDragState.current = { id };
+    setDraggingProgramId(id);
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch (_) {}
+  };
+
+  const handleProgramPointerMove = (e) => {
+    const st = programDragState.current;
+    if (!st || !programListRef.current) return;
+    const els = Array.from(programListRef.current.querySelectorAll('[data-sort-id]'));
+    const currentIndex = data.program.order.findIndex((id) => id === st.id);
+    if (currentIndex === -1) return;
+    let targetIndex = els.length - 1;
+    for (let i = 0; i < els.length; i++) {
+      const rect = els[i].getBoundingClientRect();
+      if (e.clientX < rect.left + rect.width / 2) {
+        targetIndex = i;
+        break;
+      }
+    }
+    if (targetIndex !== currentIndex) {
+      setData((prev) => ({ ...prev, program: { ...prev.program, order: moveItem(prev.program.order, currentIndex, targetIndex) } }));
+      justDraggedProgramRef.current = true;
+    }
+  };
+
+  const handleProgramPointerUp = () => {
+    programDragState.current = null;
+    setDraggingProgramId(null);
+    setTimeout(() => {
+      justDraggedProgramRef.current = false;
+    }, 50);
+  };
+
+  const handleResetCycle = () => {
+    askConfirm(
+      "Reset the current cycle? This clears completion marks — your logged history stays intact.",
+      () => setData((prev) => ({ ...prev, program: { ...prev.program, loggedIds: [] } })),
+      'Reset'
+    );
+  };
+
+  const updateExercise = (dayId, exId, fn) => {
+    updateDay(dayId, (d) => ({
+      ...d,
+      exercises: d.exercises.map((ex) => (ex.id === exId ? fn(ex) : ex)),
+    }));
+  };
+
+  const addToLibrary = (name, muscleGroup = 'Other') => {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    setData((prev) => {
+      const exists = prev.library.some((l) => l.name.toLowerCase() === trimmed.toLowerCase());
+      if (exists) return prev;
+      return { ...prev, library: [...prev.library, { id: genId('lib'), name: trimmed, muscleGroup }] };
+    });
+  };
+
+  const removeFromLibrary = (id) => {
+    setData((prev) => ({ ...prev, library: prev.library.filter((l) => l.id !== id) }));
+  };
+
+  const updateLibraryGroup = (id, muscleGroup) => {
+    setData((prev) => ({ ...prev, library: prev.library.map((l) => (l.id === id ? { ...l, muscleGroup } : l)) }));
+  };
+
+  const addSet = (dayId, exId) => {
+    updateExercise(dayId, exId, (ex) => ({ ...ex, sets: [...ex.sets, { weight: '', reps: '' }] }));
+  };
+
+  const removeSet = (dayId, exId, idx) => {
+    updateExercise(dayId, exId, (ex) => {
+      if (ex.sets.length <= 1) return { ...ex, sets: [{ weight: '', reps: '' }] };
+      return { ...ex, sets: ex.sets.filter((_, i) => i !== idx) };
+    });
+  };
+
+  const updateSetField = (dayId, exId, idx, field, value) => {
+    updateExercise(dayId, exId, (ex) => ({
+      ...ex,
+      sets: ex.sets.map((s, i) => (i === idx ? { ...s, [field]: value } : s)),
+    }));
+  };
+
+  const logSession = (dayId, exId) => {
+    const day = data.days.find((d) => d.id === dayId);
+    const ex = day?.exercises.find((e) => e.id === exId);
+    if (!ex) return;
+    const meaningful = ex.sets.filter((s) => s.weight !== '' || s.reps !== '');
+    if (!meaningful.length) return;
+
+    const updatedEx = {
+      ...ex,
+      history: [{ id: genId('log'), date: new Date().toISOString(), sets: meaningful }, ...ex.history],
+    };
+    const updatedDays = data.days.map((d) =>
+      d.id === dayId ? { ...d, exercises: d.exercises.map((e) => (e.id === exId ? updatedEx : e)) } : d
+    );
+    const loggedIds = data.program.loggedIds.includes(exId) ? data.program.loggedIds : [...data.program.loggedIds, exId];
+    const cycleComplete =
+      data.program.order.length > 0 &&
+      data.program.order.every((id) => {
+        const d = updatedDays.find((dd) => dd.id === id);
+        return d && dayIsComplete(d, loggedIds);
+      });
+
+    setData((prev) => ({
+      ...prev,
+      days: prev.days.map((d) =>
+        d.id === dayId ? { ...d, exercises: d.exercises.map((e) => (e.id === exId ? updatedEx : e)) } : d
+      ),
+      program: { ...prev.program, loggedIds: cycleComplete ? [] : loggedIds },
+    }));
+
+    setJustLogged(exId);
+    setTimeout(() => setJustLogged((cur) => (cur === exId ? null : cur)), 1800);
+
+    if (cycleComplete) {
+      setCycleFlash(true);
+      setTimeout(() => setCycleFlash(false), 3000);
+    }
+  };
+
+  const clearSets = (dayId, exId) => {
+    updateExercise(dayId, exId, (ex) => ({ ...ex, sets: [{ weight: '', reps: '' }] }));
+  };
+
+  const updateNotes = (dayId, exId, text) => {
+    updateExercise(dayId, exId, (ex) => ({ ...ex, notes: text }));
+  };
+
+  const toggleNotes = (exId) => setOpenNotes((p) => ({ ...p, [exId]: !p[exId] }));
+  const toggleHistory = (exId) => setOpenHistory((p) => ({ ...p, [exId]: !p[exId] }));
+
+  // Swapping moves the current exercise (with its full history) into the day's archive
+  // and drops a fresh exercise into the same slot.
+  const archiveAndSwap = (dayId, exId, newName) => {
+    updateDay(dayId, (d) => {
+      const idx = d.exercises.findIndex((e) => e.id === exId);
+      if (idx === -1) return d;
+      const old = d.exercises[idx];
+      const fresh = mkExercise(newName);
+      const exercises = [...d.exercises];
+      exercises[idx] = fresh;
+      return { ...d, exercises, archived: [old, ...(d.archived || [])] };
+    });
+  };
+
+  const restoreExercise = (dayId, archivedId) => {
+    updateDay(dayId, (d) => {
+      const archived = d.archived || [];
+      const idx = archived.findIndex((e) => e.id === archivedId);
+      if (idx === -1) return d;
+      const ex = archived[idx];
+      return { ...d, exercises: [...d.exercises, ex], archived: archived.filter((e) => e.id !== archivedId) };
+    });
+  };
+
+  const deleteArchived = (dayId, archivedId, name) => {
+    askConfirm(`Permanently delete archived "${name}"? This can't be undone.`, () => {
+      updateDay(dayId, (d) => ({ ...d, archived: (d.archived || []).filter((e) => e.id !== archivedId) }));
+    });
+  };
+
+  const archiveExercise = (dayId, exId) => {
+    updateDay(dayId, (d) => {
+      const idx = d.exercises.findIndex((e) => e.id === exId);
+      if (idx === -1) return d;
+      const ex = d.exercises[idx];
+      return { ...d, exercises: d.exercises.filter((e) => e.id !== exId), archived: [ex, ...(d.archived || [])] };
+    });
+  };
+
+  const deleteExercise = (dayId, exId, name) => {
+    askConfirm(
+      `Archive "${name}"? You'll find it under this exercise in the Library tab, and can restore it anytime.`,
+      () => archiveExercise(dayId, exId),
+      'Archive'
+    );
+  };
+
+  const addExercise = (dayId, name) => {
+    updateDay(dayId, (d) => ({ ...d, exercises: [...d.exercises, mkExercise(name)] }));
+    setAddingExerciseFor(null);
+  };
+
+  const addDay = () => {
+    const name = newDayName.trim();
+    if (!name) return;
+    const id = genId('day');
+    setData((prev) => ({
+      ...prev,
+      days: [...prev.days, { id, name, exercises: [], archived: [] }],
+      program: { ...prev.program, order: [...prev.program.order, id] },
+    }));
+    setActiveDayId(id);
+    setNewDayName('');
+    setAddingDay(false);
+  };
+
+  const startRenameDay = (dayId, currentName) => {
+    setEditingDayId(dayId);
+    setEditingDayName(currentName);
+  };
+
+  const confirmRenameDay = (dayId) => {
+    const name = editingDayName.trim();
+    if (name) {
+      setData((prev) => ({ ...prev, days: prev.days.map((d) => (d.id === dayId ? { ...d, name } : d)) }));
+    }
+    setEditingDayId(null);
+  };
+
+  const deleteDay = (dayId, name) => {
+    if (data.days.length <= 1) return; // button is disabled in this case, see render
+    askConfirm(`Delete "${name}" and everything logged for it?`, () => {
+      const remaining = data.days.filter((d) => d.id !== dayId);
+      setData((prev) => ({
+        ...prev,
+        days: remaining,
+        program: { ...prev.program, order: prev.program.order.filter((id) => id !== dayId) },
+      }));
+      if (activeDayId === dayId) setActiveDayId(remaining[0]?.id ?? null);
+    });
+  };
+
+  return (
+    <div className="min-h-screen bg-stone-950 text-stone-100">
+      <div className="max-w-2xl mx-auto px-4 pt-6 pb-24">
+        {/* Header */}
+        <div className="flex items-start justify-between mb-5">
+          <div>
+            <h1 className="text-2xl font-black tracking-tight text-stone-50 uppercase" style={{ letterSpacing: '0.02em' }}>
+              Gainz Gizmo
+            </h1>
+            <p className="text-xs text-stone-500 mt-0.5">Weight in lbs · tap a set to edit</p>
+          </div>
+          <SaveIndicator state={saveState} />
+        </div>
+
+        {/* View switcher */}
+        <div className="flex items-center gap-1 mb-5 bg-stone-900 rounded-md p-1 w-fit">
+          <button
+            onClick={() => setView('log')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-bold uppercase tracking-wide transition-colors ${
+              view === 'log' ? 'bg-cyan-600 text-stone-950' : 'text-stone-500 hover:text-stone-300'
+            }`}
+          >
+            <ListChecks className="w-3.5 h-3.5" /> Log
+          </button>
+          <button
+            onClick={() => setView('library')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-bold uppercase tracking-wide transition-colors ${
+              view === 'library' ? 'bg-cyan-600 text-stone-950' : 'text-stone-500 hover:text-stone-300'
+            }`}
+          >
+            <LibraryIcon className="w-3.5 h-3.5" /> Library ({data.library.length})
+          </button>
+        </div>
+
+        {view === 'library' ? (
+          <LibraryView
+            library={data.library}
+            onAdd={addToLibrary}
+            onRemove={removeFromLibrary}
+            onSelect={setPrName}
+            onUpdateGroup={updateLibraryGroup}
+          />
+        ) : (
+          <>
+            {/* Day tabs */}
+            <button
+              onClick={() => setSessionsCollapsed((v) => !v)}
+              className="flex items-center gap-1 text-[11px] font-bold uppercase tracking-wide text-stone-500 hover:text-stone-300 mb-1.5"
+            >
+              {sessionsCollapsed ? <ChevronDown className="w-3 h-3" /> : <ChevronUp className="w-3 h-3" />}
+              Sessions
+            </button>
+            {!sessionsCollapsed && (
+            <div ref={dayTabsRef} className="flex items-center gap-1.5 overflow-x-auto pb-1 mb-5 -mx-1 px-1">
+              {data.days.map((d) => (
+                <div
+                  key={d.id}
+                  data-sort-id={d.id}
+                  className={`shrink-0 flex items-center rounded-md text-sm font-bold uppercase tracking-wide transition-colors ${
+                    d.id === activeDayId
+                      ? 'bg-cyan-600 text-stone-950'
+                      : 'bg-stone-900 text-stone-400 hover:bg-stone-800 hover:text-stone-200'
+                  } ${draggingDayId === d.id ? 'opacity-60 ring-2 ring-cyan-400' : ''}`}
+                >
+                  <button
+                    onPointerDown={handleDayPointerDown(d.id)}
+                    onPointerMove={handleDayPointerMove}
+                    onPointerUp={handleDayPointerUp}
+                    onPointerCancel={handleDayPointerUp}
+                    style={{ touchAction: 'none' }}
+                    className="pl-2 pr-0.5 py-2 cursor-grab active:cursor-grabbing opacity-70"
+                    aria-label={`Reorder ${d.name}`}
+                  >
+                    <GripVertical className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    onClick={() => {
+                      if (justDraggedDayRef.current) return;
+                      setActiveDayId(d.id);
+                    }}
+                    className="pr-3.5 pl-1 py-2"
+                  >
+                    {d.name}
+                  </button>
+                </div>
+              ))}
+              {addingDay ? (
+                <div className="shrink-0 flex items-center gap-1 bg-stone-900 rounded-md px-2 py-1">
+                  <input
+                    autoFocus
+                    value={newDayName}
+                    onChange={(e) => setNewDayName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') addDay();
+                      if (e.key === 'Escape') setAddingDay(false);
+                    }}
+                    placeholder="Day name"
+                    className="bg-transparent text-sm text-stone-100 placeholder-stone-600 outline-none w-24"
+                  />
+                  <button onClick={addDay} className="text-cyan-500 hover:text-cyan-400">
+                    <Check className="w-4 h-4" />
+                  </button>
+                  <button onClick={() => setAddingDay(false)} className="text-stone-600 hover:text-stone-400">
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => setAddingDay(true)}
+                  className="shrink-0 w-9 h-9 flex items-center justify-center rounded-md bg-stone-900 text-stone-500 hover:bg-stone-800 hover:text-stone-300"
+                  aria-label="Add day"
+                >
+                  <Plus className="w-4 h-4" />
+                </button>
+              )}
+            </div>
+            )}
+
+            {/* Active Program */}
+            {data.days.length > 0 && (
+              <div className="mb-5">
+                <div className="flex items-center justify-between mb-1.5">
+                  <p className="text-[11px] font-bold uppercase tracking-wide text-stone-500">
+                    Active Program{' '}
+                    <span className="text-stone-700">
+                      ({data.program.order.filter((id) => {
+                        const d = data.days.find((dd) => dd.id === id);
+                        return d && dayIsComplete(d, data.program.loggedIds);
+                      }).length}
+                      /{data.program.order.length} complete)
+                    </span>
+                  </p>
+                  {data.program.loggedIds.length > 0 && (
+                    <button
+                      onClick={handleResetCycle}
+                      className="flex items-center gap-1 text-[11px] text-stone-600 hover:text-red-500"
+                    >
+                      <RefreshCw className="w-3 h-3" /> Reset cycle
+                    </button>
+                  )}
+                </div>
+                <div
+                  ref={programListRef}
+                  style={{ minHeight: '2.75rem' }}
+                  className={`flex items-center gap-1.5 overflow-x-auto pb-1 -mx-1 px-1 rounded-md transition-colors ${
+                    programDropHover ? 'bg-cyan-500/10 ring-2 ring-cyan-500/50' : ''
+                  }`}
+                >
+                  {data.program.order.map((dayId) => {
+                    const day = data.days.find((d) => d.id === dayId);
+                    if (!day) return null;
+                    const complete = dayIsComplete(day, data.program.loggedIds);
+                    return (
+                      <div
+                        key={dayId}
+                        data-sort-id={dayId}
+                        className={`shrink-0 flex items-center rounded-md text-sm font-bold uppercase tracking-wide border transition-colors ${
+                          complete
+                            ? 'bg-emerald-500/10 border-emerald-500/40 text-emerald-400'
+                            : 'bg-stone-900 border-stone-800 text-stone-400'
+                        } ${draggingProgramId === dayId ? 'opacity-60 ring-2 ring-cyan-400' : ''}`}
+                      >
+                        <button
+                          onPointerDown={handleProgramPointerDown(dayId)}
+                          onPointerMove={handleProgramPointerMove}
+                          onPointerUp={handleProgramPointerUp}
+                          onPointerCancel={handleProgramPointerUp}
+                          style={{ touchAction: 'none' }}
+                          className="pl-2 pr-0.5 py-2 cursor-grab active:cursor-grabbing opacity-70"
+                          aria-label={`Reorder ${day.name} in program`}
+                        >
+                          <GripVertical className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          onClick={() => {
+                            if (justDraggedProgramRef.current) return;
+                            setActiveDayId(dayId);
+                          }}
+                          className="pl-1 pr-1 py-2 flex items-center gap-1.5"
+                        >
+                          {complete && <Check className="w-3.5 h-3.5" />}
+                          {day.name}
+                        </button>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            removeFromProgram(dayId);
+                          }}
+                          className="pl-1 pr-2 py-2 opacity-60 hover:opacity-100"
+                          aria-label={`Remove ${day.name} from program`}
+                          title="Remove from program"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Active day controls */}
+            {activeDay && (
+              <div className="flex items-center justify-between mb-3">
+                {editingDayId === activeDay.id ? (
+                  <div className="flex items-center gap-1.5">
+                    <input
+                      autoFocus
+                      value={editingDayName}
+                      onChange={(e) => setEditingDayName(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') confirmRenameDay(activeDay.id);
+                        if (e.key === 'Escape') setEditingDayId(null);
+                      }}
+                      className="bg-stone-900 border border-stone-700 rounded px-2 py-1 text-sm text-stone-100 outline-none focus:border-cyan-600"
+                    />
+                    <button onClick={() => confirmRenameDay(activeDay.id)} className="text-cyan-500 hover:text-cyan-400">
+                      <Check className="w-4 h-4" />
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => startRenameDay(activeDay.id, activeDay.name)}
+                    className="flex items-center gap-1.5 text-stone-500 hover:text-stone-300 text-xs"
+                  >
+                    <Pencil className="w-3 h-3" /> Rename day
+                  </button>
+                )}
+                <button
+                  onClick={() => deleteDay(activeDay.id, activeDay.name)}
+                  disabled={data.days.length <= 1}
+                  title={data.days.length <= 1 ? 'Add another day before deleting this one' : undefined}
+                  className={`flex items-center gap-1.5 text-xs ${
+                    data.days.length <= 1 ? 'text-stone-800 cursor-not-allowed' : 'text-stone-600 hover:text-red-500'
+                  }`}
+                >
+                  <Trash2 className="w-3 h-3" /> Delete day
+                </button>
+              </div>
+            )}
+
+            {/* Exercises */}
+            <div className="space-y-3">
+              {activeDay && activeDay.exercises.length === 0 && (
+                <div className="text-center py-10 text-stone-600 text-sm border border-dashed border-stone-800 rounded-lg">
+                  No exercises yet. Add your first one below.
+                </div>
+              )}
+
+              {activeDay && activeDay.exercises.length > 0 && (
+                <div ref={exerciseListRef} className="space-y-3">
+                  {activeDay.exercises.map((ex) => {
+                    const gc = groupColor(groupForName(ex.name));
+                    return (
+                      <div
+                        key={ex.id}
+                        data-sort-id={ex.id}
+                        className={`bg-stone-900 rounded-lg border border-stone-800 ${gc.left} border-l-4 overflow-hidden ${
+                          draggingExerciseId === ex.id ? 'opacity-60 ring-2 ring-cyan-400' : ''
+                        }`}
+                      >
+                    {/* Exercise header */}
+                    <div className="px-3.5 pt-3 pb-2">
+                      {swapId === ex.id ? (
+                        <ExercisePicker
+                          library={data.library}
+                          initialValue=""
+                          placeholder={`Replace "${ex.name}" with…`}
+                          onChoose={(name) => {
+                            archiveAndSwap(activeDay.id, ex.id, name);
+                            setSwapId(null);
+                          }}
+                          onCancel={() => setSwapId(null)}
+                          onGoToLibrary={() => {
+                            setSwapId(null);
+                            setView('library');
+                          }}
+                        />
+                      ) : (
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <button
+                              onPointerDown={handleExercisePointerDown(ex.id)}
+                              onPointerMove={handleExercisePointerMove}
+                              onPointerUp={handleExercisePointerUp}
+                              onPointerCancel={handleExercisePointerUp}
+                              style={{ touchAction: 'none' }}
+                              className="text-stone-600 hover:text-stone-400 cursor-grab active:cursor-grabbing shrink-0 -ml-1"
+                              aria-label={`Reorder ${ex.name}`}
+                            >
+                              <GripVertical className="w-4 h-4" />
+                            </button>
+                            <h3 className="font-bold text-stone-100 text-[15px] truncate">{ex.name}</h3>
+                            <span
+                              className={`shrink-0 text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded border ${gc.bg} ${gc.text} ${gc.border}`}
+                            >
+                              {groupForName(ex.name)}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-0.5 shrink-0">
+                            <IconButton onClick={() => setSwapId(ex.id)} label="Swap exercise">
+                              <RefreshCw className="w-3.5 h-3.5" />
+                            </IconButton>
+                            <IconButton
+                              onClick={() => toggleNotes(ex.id)}
+                              label="Notes"
+                              active={openNotes[ex.id]}
+                              dot={!!ex.notes.trim()}
+                            >
+                              <StickyNote className="w-3.5 h-3.5" />
+                            </IconButton>
+                            <IconButton
+                              onClick={() => toggleHistory(ex.id)}
+                              label="History"
+                              active={openHistory[ex.id]}
+                              dot={ex.history.length > 0}
+                            >
+                              <HistoryIcon className="w-3.5 h-3.5" />
+                            </IconButton>
+                            <IconButton onClick={() => deleteExercise(activeDay.id, ex.id, ex.name)} label="Archive exercise">
+                              <ArchiveIcon className="w-3.5 h-3.5" />
+                            </IconButton>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Sets */}
+                    <div className="px-3.5 pb-3 space-y-1.5">
+                      {ex.sets.map((s, idx) => (
+                        <div key={idx} className="flex items-center gap-2">
+                          <span className="w-6 h-6 rounded-full bg-amber-500 text-stone-950 text-[11px] font-black flex items-center justify-center shrink-0">
+                            {idx + 1}
+                          </span>
+                          <input
+                            type="number"
+                            inputMode="decimal"
+                            value={s.weight}
+                            onChange={(e) => updateSetField(activeDay.id, ex.id, idx, 'weight', e.target.value)}
+                            placeholder="lbs"
+                            className="w-20 bg-stone-950 border border-stone-800 rounded px-2 py-1.5 text-sm text-stone-100 placeholder-stone-700 outline-none focus:border-cyan-700 font-mono tabular-nums"
+                          />
+                          <span className="text-stone-600 text-sm">×</span>
+                          <input
+                            type="number"
+                            inputMode="numeric"
+                            value={s.reps}
+                            onChange={(e) => updateSetField(activeDay.id, ex.id, idx, 'reps', e.target.value)}
+                            placeholder="reps"
+                            className="w-20 bg-stone-950 border border-stone-800 rounded px-2 py-1.5 text-sm text-stone-100 placeholder-stone-700 outline-none focus:border-cyan-700 font-mono tabular-nums"
+                          />
+                          <button
+                            onClick={() => removeSet(activeDay.id, ex.id, idx)}
+                            className="ml-auto text-stone-700 hover:text-red-500"
+                            aria-label="Remove set"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      ))}
+                      <button
+                        onClick={() => addSet(activeDay.id, ex.id)}
+                        className="flex items-center gap-1 text-xs text-cyan-600 hover:text-cyan-400 mt-1 pl-8"
+                      >
+                        <Plus className="w-3 h-3" /> Add set
+                      </button>
+                    </div>
+
+                    {/* Notes panel */}
+                    {openNotes[ex.id] && (
+                      <div className="px-3.5 pb-3 border-t border-stone-800 pt-2.5">
+                        <textarea
+                          value={ex.notes}
+                          onChange={(e) => updateNotes(activeDay.id, ex.id, e.target.value)}
+                          placeholder="Form cues, pain flags, tempo, anything worth remembering…"
+                          rows={2}
+                          className="w-full bg-stone-950 border border-stone-800 rounded px-2.5 py-2 text-sm text-stone-200 placeholder-stone-700 outline-none focus:border-cyan-700 resize-none"
+                        />
+                      </div>
+                    )}
+
+                    {/* History panel */}
+                    {openHistory[ex.id] && (
+                      <div className="px-3.5 pb-3 border-t border-stone-800 pt-2.5">
+                        {ex.history.length === 0 ? (
+                          <p className="text-xs text-stone-600">No sessions logged yet.</p>
+                        ) : (
+                          <div className="space-y-1.5 max-h-40 overflow-y-auto pr-1">
+                            {ex.history.map((h) => (
+                              <div key={h.id} className="flex items-baseline gap-2 text-xs">
+                                <span className="text-stone-500 font-mono shrink-0 w-12">{formatDate(h.date)}</span>
+                                <span className="text-stone-300 font-mono tabular-nums">{summarizeSets(h.sets)}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Footer: log session */}
+                    <div className="flex items-center justify-between px-3.5 py-2.5 bg-stone-950 border-t border-stone-800">
+                      <span className="text-[11px] text-stone-600">
+                        {ex.history.length > 0 ? `Last logged ${formatDate(ex.history[0].date)}` : 'Not logged yet'}
+                      </span>
+                      <div className="flex items-center gap-2">
+                        <button onClick={() => clearSets(activeDay.id, ex.id)} className="text-[11px] text-stone-600 hover:text-stone-400">
+                          Clear
+                        </button>
+                        <button
+                          onClick={() => logSession(activeDay.id, ex.id)}
+                          className="flex items-center gap-1 text-xs font-bold px-2.5 py-1.5 rounded bg-cyan-600 text-stone-950 hover:bg-cyan-500"
+                        >
+                          {justLogged === ex.id ? (
+                            <>
+                              <Check className="w-3.5 h-3.5" /> Logged
+                            </>
+                          ) : (
+                            'Log session'
+                          )}
+                        </button>
+                      </div>
+                    </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* Add exercise */}
+              {activeDay && (
+                <div>
+                  {addingExerciseFor === activeDay.id ? (
+                    <div className="bg-stone-900 rounded-lg border border-stone-800 px-3 py-2.5">
+                      <ExercisePicker
+                        library={data.library}
+                        initialValue=""
+                        placeholder="Search your library"
+                        onChoose={(name) => addExercise(activeDay.id, name)}
+                        onCancel={() => setAddingExerciseFor(null)}
+                        onGoToLibrary={() => {
+                          setAddingExerciseFor(null);
+                          setView('library');
+                        }}
+                      />
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => setAddingExerciseFor(activeDay.id)}
+                      className="w-full flex items-center justify-center gap-1.5 py-2.5 rounded-lg border border-dashed border-stone-800 text-stone-500 text-sm hover:border-stone-700 hover:text-stone-300"
+                    >
+                      <Plus className="w-4 h-4" /> Add exercise
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          </>
+        )}
+      </div>
+
+      {confirm && (
+        <div
+          className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 px-4"
+          onClick={() => setConfirm(null)}
+        >
+          <div
+            className="bg-stone-900 border border-stone-700 rounded-lg p-4 max-w-sm w-full"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <p className="text-sm text-stone-200 mb-4">{confirm.message}</p>
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => setConfirm(null)}
+                className="px-3 py-1.5 rounded text-sm text-stone-400 hover:text-stone-200"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  confirm.onConfirm();
+                  setConfirm(null);
+                }}
+                className={`px-3 py-1.5 rounded text-sm font-bold text-stone-950 ${
+                  confirm.confirmLabel === 'Archive' || confirm.confirmLabel === 'Reset'
+                    ? 'bg-cyan-600 hover:bg-cyan-500'
+                    : 'bg-red-600 hover:bg-red-500'
+                }`}
+              >
+                {confirm.confirmLabel || 'Delete'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {prName && (
+        <PRModal
+          name={prName}
+          stats={getExerciseStats(data.days, prName)}
+          archivedMatches={getArchivedMatches(data.days, prName)}
+          onClose={() => setPrName(null)}
+          onRestore={restoreExercise}
+          onDeleteArchived={(dayId, exId, exName) => {
+            setPrName(null); // close so the confirm dialog isn't hidden behind this one
+            deleteArchived(dayId, exId, exName);
+          }}
+        />
+      )}
+
+      {cycleFlash && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 bg-emerald-600 text-stone-950 text-sm font-bold px-4 py-2 rounded-full shadow-lg whitespace-nowrap">
+          Program cycle complete — reset for the next round
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PRModal({ name, stats, archivedMatches, onClose, onRestore, onDeleteArchived }) {
+  return (
+    <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 px-4" onClick={onClose}>
+      <div
+        className="bg-stone-900 border border-stone-700 rounded-lg p-5 max-w-sm w-full max-h-[85vh] overflow-y-auto"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-start justify-between mb-4">
+          <div className="flex items-center gap-2">
+            <Trophy className="w-4 h-4 text-amber-500" />
+            <h3 className="text-base font-bold text-stone-100">{name}</h3>
+          </div>
+          <button onClick={onClose} className="text-stone-500 hover:text-stone-300" aria-label="Close">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        {stats.sessions === 0 ? (
+          <p className="text-sm text-stone-500">No sessions logged for this exercise yet.</p>
+        ) : (
+          <div className="space-y-3">
+            <div className="bg-stone-950 rounded-md p-3 border border-stone-800">
+              <p className="text-[11px] uppercase tracking-wide text-stone-500 mb-1">Heaviest set</p>
+              <p className="text-2xl font-black text-amber-500 font-mono tabular-nums">
+                {stats.bestWeightSet.weight} × {stats.bestWeightSet.reps}
+              </p>
+              <p className="text-[11px] text-stone-600 mt-0.5">{formatDate(stats.bestWeightSet.date)}</p>
+            </div>
+            <div className="bg-stone-950 rounded-md p-3 border border-stone-800">
+              <p className="text-[11px] uppercase tracking-wide text-stone-500 mb-1">Best estimated 1RM</p>
+              <p className="text-2xl font-black text-cyan-500 font-mono tabular-nums">
+                {Math.round(stats.bestEst1RM.value)}
+              </p>
+              <p className="text-[11px] text-stone-600 mt-0.5">
+                from {stats.bestEst1RM.weight} × {stats.bestEst1RM.reps} on {formatDate(stats.bestEst1RM.date)}
+              </p>
+            </div>
+            <p className="text-[11px] text-stone-600">
+              {stats.sessions} session{stats.sessions > 1 ? 's' : ''} logged · last on {formatDate(stats.lastDate)}
+            </p>
+          </div>
+        )}
+
+        {archivedMatches.length > 0 && (
+          <div className="mt-4 pt-4 border-t border-stone-800">
+            <p className="flex items-center gap-1.5 text-[11px] uppercase tracking-wide text-stone-500 mb-2">
+              <ArchiveIcon className="w-3 h-3" /> Archived ({archivedMatches.length})
+            </p>
+            <div className="space-y-2">
+              {archivedMatches.map(({ dayId, dayName, ex }) => (
+                <div key={ex.id} className="bg-stone-950 rounded-md border border-dashed border-stone-800 px-3 py-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-stone-400">{dayName}</span>
+                    <div className="flex items-center gap-3">
+                      <button
+                        onClick={() => onRestore(dayId, ex.id)}
+                        className="flex items-center gap-1 text-xs text-cyan-600 hover:text-cyan-400"
+                      >
+                        <Undo2 className="w-3.5 h-3.5" /> Restore
+                      </button>
+                      <button
+                        onClick={() => onDeleteArchived(dayId, ex.id, ex.name)}
+                        className="text-stone-600 hover:text-red-500"
+                        aria-label={`Permanently delete archived ${ex.name} from ${dayName}`}
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                  <p className="text-[11px] text-stone-600 mt-1">
+                    {ex.history.length > 0
+                      ? `${ex.history.length} session${ex.history.length > 1 ? 's' : ''} kept · last ${formatDate(ex.history[0].date)}`
+                      : 'No sessions were logged before this was archived'}
+                  </p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Search-and-select from the library. Selection only — new exercises are added via the Library tab.
+// Two-step picker: choose a muscle group first (colored chips), then search/select within it.
+function ExercisePicker({ library, initialValue = '', onChoose, onCancel, placeholder, onGoToLibrary }) {
+  const [group, setGroup] = useState(null); // null = still choosing a group
+  const [query, setQuery] = useState(initialValue);
+
+  const groupsWithItems = MUSCLE_GROUPS.filter((g) => library.some((l) => (l.muscleGroup || 'Other') === g));
+
+  // Step 1: pick a muscle group to narrow the list
+  if (group === null) {
+    return (
+      <div>
+        <p className="text-xs text-stone-500 mb-2">Pick a muscle group</p>
+        <div className="flex flex-wrap gap-1.5">
+          {groupsWithItems.map((g) => {
+            const gc = groupColor(g);
+            return (
+              <button
+                key={g}
+                onClick={() => setGroup(g)}
+                className={`px-2.5 py-1.5 rounded-md text-xs font-bold border ${gc.bg} ${gc.text} ${gc.border} hover:brightness-125`}
+              >
+                {g}
+              </button>
+            );
+          })}
+          <button
+            onClick={() => setGroup('All')}
+            className="px-2.5 py-1.5 rounded-md text-xs font-bold border bg-stone-800 text-stone-400 border-stone-700 hover:text-stone-200"
+          >
+            All exercises
+          </button>
+        </div>
+        <button onClick={onCancel} className="text-xs text-stone-600 hover:text-stone-400 mt-2">
+          Cancel
+        </button>
+      </div>
+    );
+  }
+
+  // Step 2: search/select within the chosen group
+  const q = query.trim().toLowerCase();
+  const filtered = library
+    .filter((l) => group === 'All' || (l.muscleGroup || 'Other') === group)
+    .filter((l) => !q || l.name.toLowerCase().includes(q));
+  const gc = group !== 'All' ? groupColor(group) : null;
+
+  const choose = (name) => onChoose(name);
+
+  return (
+    <div>
+      <button onClick={() => setGroup(null)} className="text-xs text-stone-500 hover:text-stone-300 mb-1.5">
+        ← {group === 'All' ? 'All exercises' : group}
+      </button>
+      <div className="flex items-center gap-1.5">
+        <input
+          autoFocus
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && filtered.length === 1) choose(filtered[0].name);
+            if (e.key === 'Escape') onCancel();
+          }}
+          placeholder={placeholder || `Search ${group === 'All' ? 'your library' : group.toLowerCase()}`}
+          className={`flex-1 bg-stone-950 border rounded px-2 py-1.5 text-sm text-stone-100 placeholder-stone-600 outline-none ${
+            gc ? gc.border : 'border-cyan-700'
+          }`}
+        />
+        <button onClick={onCancel} className="text-stone-600 hover:text-stone-400" aria-label="Cancel">
+          <X className="w-4 h-4" />
+        </button>
+      </div>
+      <div className="max-h-36 overflow-y-auto space-y-0.5 mt-1.5">
+        {filtered.length === 0 ? (
+          <div className="px-2 py-1.5">
+            <p className="text-xs text-stone-600">No matches{group !== 'All' ? ` in ${group}` : ''}.</p>
+            {onGoToLibrary && (
+              <button onClick={() => onGoToLibrary(query)} className="text-xs text-cyan-500 hover:text-cyan-400 mt-1">
+                Add "{query.trim() || 'it'}" from the Library tab
+              </button>
+            )}
+          </div>
+        ) : (
+          filtered.map((l) => {
+            const rowGc = groupColor(l.muscleGroup || 'Other');
+            return (
+              <button
+                key={l.id}
+                onClick={() => choose(l.name)}
+                className="w-full flex items-center gap-2 px-2 py-1 rounded text-sm text-stone-300 hover:bg-stone-800"
+              >
+                <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${rowGc.dot}`} />
+                <span className="truncate flex-1 text-left">{l.name}</span>
+                {group === 'All' && (
+                  <span className={`text-[10px] uppercase tracking-wide shrink-0 ${rowGc.text}`}>{l.muscleGroup || 'Other'}</span>
+                )}
+              </button>
+            );
+          })
+        )}
+      </div>
+    </div>
+  );
+}
+
+function LibraryView({ library, onAdd, onRemove, onSelect, onUpdateGroup }) {
+  const [query, setQuery] = useState('');
+  const [newGroup, setNewGroup] = useState(MUSCLE_GROUPS[0]);
+
+  const submit = () => {
+    if (query.trim()) {
+      onAdd(query, newGroup);
+      setQuery('');
+    }
+  };
+
+  const grouped = MUSCLE_GROUPS.map((group) => ({
+    group,
+    items: library.filter((l) => (l.muscleGroup || 'Other') === group).sort((a, b) => a.name.localeCompare(b.name)),
+  })).filter((g) => g.items.length > 0);
+
+  return (
+    <div>
+      <div className="flex items-center gap-1.5 mb-4">
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') submit();
+          }}
+          placeholder="Add an exercise to your library"
+          className="flex-1 bg-stone-900 border border-stone-800 rounded px-3 py-2 text-sm text-stone-100 placeholder-stone-600 outline-none focus:border-cyan-700"
+        />
+        <select
+          value={newGroup}
+          onChange={(e) => setNewGroup(e.target.value)}
+          className="bg-stone-900 border border-stone-800 rounded px-2 py-2 text-sm text-stone-300 outline-none focus:border-cyan-700"
+        >
+          {MUSCLE_GROUPS.map((g) => (
+            <option key={g} value={g}>
+              {g}
+            </option>
+          ))}
+        </select>
+        <button onClick={submit} className="px-3 py-2 rounded bg-cyan-600 text-stone-950 text-sm font-bold hover:bg-cyan-500">
+          Add
+        </button>
+      </div>
+
+      {grouped.length === 0 ? (
+        <p className="text-center text-stone-600 text-sm py-8">
+          Your library is empty. Add exercises above so they're ready to pick from in the log.
+        </p>
+      ) : (
+        <div className="space-y-4">
+          {grouped.map(({ group, items }) => {
+            const gc = groupColor(group);
+            return (
+            <div key={group}>
+              <p className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide text-stone-500 mb-1.5">
+                <span className={`w-2 h-2 rounded-full ${gc.dot}`} />
+                {group} <span className="text-stone-700">({items.length})</span>
+              </p>
+              <div className="space-y-1">
+                {items.map((l) => (
+                  <div
+                    key={l.id}
+                    className={`flex items-center justify-between bg-stone-900 rounded-md px-3 py-2 border border-stone-800 ${gc.left} border-l-4 hover:border-stone-700 cursor-pointer`}
+                    onClick={() => onSelect(l.name)}
+                  >
+                    <span className="flex items-center gap-2 text-sm text-stone-200 min-w-0">
+                      <Trophy className="w-3.5 h-3.5 text-stone-600 shrink-0" />
+                      <span className="truncate">{l.name}</span>
+                    </span>
+                    <div className="flex items-center gap-2 shrink-0" onClick={(e) => e.stopPropagation()}>
+                      <select
+                        value={l.muscleGroup || 'Other'}
+                        onChange={(e) => onUpdateGroup(l.id, e.target.value)}
+                        aria-label={`Muscle group for ${l.name}`}
+                        className="bg-stone-950 border border-stone-800 rounded px-1.5 py-1 text-xs text-stone-400 outline-none focus:border-cyan-700"
+                      >
+                        {MUSCLE_GROUPS.map((g) => (
+                          <option key={g} value={g}>
+                            {g}
+                          </option>
+                        ))}
+                      </select>
+                      <button onClick={() => onRemove(l.id)} className="text-stone-600 hover:text-red-500" aria-label={`Remove ${l.name} from library`}>
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+            );
+          })}
+        </div>
+      )}
+      <p className="text-[11px] text-stone-600 mt-4">
+        Tap an exercise to see your PR. Removing one here only removes it from the picker — any logs already recorded under that name stay untouched.
+      </p>
+    </div>
+  );
+}
+
+function IconButton({ children, onClick, label, active, dot, danger }) {
+  return (
+    <button
+      onClick={onClick}
+      aria-label={label}
+      title={label}
+      className={`relative w-7 h-7 flex items-center justify-center rounded transition-colors ${
+        active
+          ? 'bg-cyan-600 text-stone-950'
+          : danger
+          ? 'text-stone-600 hover:text-red-500'
+          : 'text-stone-500 hover:text-stone-200 hover:bg-stone-800'
+      }`}
+    >
+      {children}
+      {dot && !active && <span className="absolute top-0.5 right-0.5 w-1.5 h-1.5 rounded-full bg-amber-500" />}
+    </button>
+  );
+}
+
+function SaveIndicator({ state }) {
+  if (state === 'saving') {
+    return (
+      <div className="flex items-center gap-1 text-stone-600 text-[11px]">
+        <Loader2 className="w-3 h-3 animate-spin" /> Saving
+      </div>
+    );
+  }
+  if (state === 'error') {
+    return (
+      <div className="flex items-center gap-1 text-red-500 text-[11px]" title="Changes may not persist">
+        <CircleAlert className="w-3 h-3" /> Not saved
+      </div>
+    );
+  }
+  if (state === 'saved') {
+    return (
+      <div className="flex items-center gap-1 text-stone-600 text-[11px]">
+        <Check className="w-3 h-3" /> Saved
+      </div>
+    );
+  }
+  return null;
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<ExerciseTracker />);
+
+</script>
+
+<script>
+  // Manually invoke Babel with the classic JSX runtime (React.createElement calls),
+  // since that's what works with a plain <script>-tag React build -- the default
+  // "automatic" runtime needs a real module bundler, which we don't have here.
+  (function () {
+    var source = document.getElementById('app-source').textContent;
+    var output = Babel.transform(source, {
+      presets: [["react", { runtime: "classic" }]],
+      filename: "app.jsx",
+    }).code;
+    (0, eval)(output);
+  })();
+</script>
+</body>
+</html>
