@@ -1335,6 +1335,7 @@ function ExerciseTracker() {
                     const day = data.days.find((d) => d.id === dayId);
                     if (!day) return null;
                     const complete = dayIsComplete(day, data.program.loggedIds);
+                    const isSelected = dayId === data.activeDayId;
                     return (
                       <div
                         key={dayId}
@@ -1343,7 +1344,9 @@ function ExerciseTracker() {
                           complete
                             ? 'bg-emerald-500/10 border-emerald-500/40 text-emerald-400'
                             : 'bg-stone-900 border-stone-800 text-stone-400'
-                        } ${draggingProgramId === dayId ? 'opacity-70 ring-2 ring-cyan-400 scale-105' : ''}`}
+                        } ${isSelected ? 'ring-2 ring-cyan-400' : ''} ${
+                          draggingProgramId === dayId ? 'opacity-70 ring-2 ring-cyan-400 scale-105' : ''
+                        }`}
                       >
                         <button
                           onPointerDown={handleProgramPointerDown(dayId)}
