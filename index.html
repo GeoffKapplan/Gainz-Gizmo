@@ -453,6 +453,7 @@ function defaultData() {
     // desktop program (Upper 1 / Legs / Upper 2 / Arms N Shii only).
     program: { order: days.slice(0, 4).map((d) => d.id), loggedIds: [] },
     sessionsCollapsed: false,
+    activeDayId: days[0]?.id ?? null,
   };
 }
 
@@ -469,6 +470,7 @@ function normalize(parsed) {
   const savedOrder = parsed.program ? parsed.program.order || [] : dayIds;
   const order = savedOrder.filter((id) => dayIds.includes(id));
   const loggedIds = (parsed.program && parsed.program.loggedIds) || [];
+  const activeDayId = dayIds.includes(parsed.activeDayId) ? parsed.activeDayId : dayIds[0] ?? null;
   return {
     library: (parsed.library || []).map((l) => ({
       ...l,
@@ -477,6 +479,7 @@ function normalize(parsed) {
     days,
     program: { order, loggedIds },
     sessionsCollapsed: typeof parsed.sessionsCollapsed === 'boolean' ? parsed.sessionsCollapsed : false,
+    activeDayId,
   };
 }
 
@@ -575,7 +578,6 @@ function getFullHistory(days, name) {
 function ExerciseTracker() {
   const [data, setData] = useState(null);
   const [view, setView] = useState('log'); // 'log' | 'library'
-  const [activeDayId, setActiveDayId] = useState(null);
   const [loaded, setLoaded] = useState(false);
   const [saveState, setSaveState] = useState('idle');
   const [openNotes, setOpenNotes] = useState({});
@@ -617,18 +619,12 @@ function ExerciseTracker() {
         const result = await window.storage.get(STORAGE_KEY, false);
         if (cancelled) return;
         if (result && result.value) {
-          const parsed = normalize(JSON.parse(result.value));
-          setData(parsed);
-          setActiveDayId(parsed.days[0]?.id ?? null);
+          setData(normalize(JSON.parse(result.value)));
         } else {
-          const d = defaultData();
-          setData(d);
-          setActiveDayId(d.days[0].id);
+          setData(defaultData());
         }
       } catch (e) {
-        const d = defaultData();
-        setData(d);
-        setActiveDayId(d.days[0].id);
+        setData(defaultData());
       } finally {
         if (!cancelled) setLoaded(true);
       }
@@ -689,7 +685,19 @@ function ExerciseTracker() {
     );
   }
 
-  const activeDay = data.days.find((d) => d.id === activeDayId) || data.days[0];
+  const activeDay = data.days.find((d) => d.id === data.activeDayId) || data.days[0];
+
+  const setActiveDayId = (id) => setData((prev) => ({ ...prev, activeDayId: id }));
+
+  // Jumps to whatever day comes after this one in the active program's rotation, wrapping
+  // back to the first day if this was the last one (which also lines up with the cycle
+  // having just reset, since completing the last day always completes the whole cycle too).
+  const advanceToNextDay = (dayId) => {
+    const idx = data.program.order.indexOf(dayId);
+    if (idx === -1) return;
+    const nextId = data.program.order[(idx + 1) % data.program.order.length];
+    setActiveDayId(nextId);
+  };
 
   const groupForName = (name) => {
     const match = data.library.find((l) => l.name.toLowerCase() === name.toLowerCase());
@@ -993,7 +1001,6 @@ function ExerciseTracker() {
       'Replace all current sessions, library, and program with this backup? This can\'t be undone.',
       () => {
         setData(normalized);
-        setActiveDayId(normalized.days[0]?.id ?? null);
         showToast('Data restored from backup');
       },
       'Replace'
@@ -1174,7 +1181,7 @@ function ExerciseTracker() {
         days: remaining,
         program: { ...prev.program, order: prev.program.order.filter((id) => id !== dayId) },
       }));
-      if (activeDayId === dayId) setActiveDayId(remaining[0]?.id ?? null);
+      if (data.activeDayId === dayId) setActiveDayId(remaining[0]?.id ?? null);
     });
   };
 
@@ -1254,7 +1261,7 @@ function ExerciseTracker() {
                     setActiveDayId(d.id);
                   }}
                   className={`shrink-0 px-3.5 py-2 rounded-md text-sm font-bold uppercase tracking-wide transition-all select-none ${
-                    d.id === activeDayId
+                    d.id === data.activeDayId
                       ? 'bg-cyan-600 text-stone-950'
                       : 'bg-stone-900 text-stone-400 hover:bg-stone-800 hover:text-stone-200'
                   } ${draggingDayId === d.id ? 'opacity-70 ring-2 ring-cyan-400 scale-105' : ''}`}
@@ -1636,6 +1643,33 @@ function ExerciseTracker() {
                   })}
                 </div>
               )}
+
+              {/* Complete-day banner: shows once every exercise here is logged, and this day
+                  is part of a multi-day active program -- offers to jump to what's next. */}
+              {activeDay &&
+                data.program.order.length > 1 &&
+                data.program.order.includes(activeDay.id) &&
+                dayIsComplete(activeDay, data.program.loggedIds) &&
+                (() => {
+                  const idx = data.program.order.indexOf(activeDay.id);
+                  const nextId = data.program.order[(idx + 1) % data.program.order.length];
+                  const nextDay = data.days.find((d) => d.id === nextId);
+                  return (
+                    <div className="flex items-center justify-between gap-3 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-4 py-3">
+                      <span className="flex items-center gap-1.5 text-sm font-bold text-emerald-300">
+                        <Check className="w-4 h-4" /> Day complete!
+                      </span>
+                      {nextDay && (
+                        <button
+                          onClick={() => advanceToNextDay(activeDay.id)}
+                          className="flex items-center gap-1 px-3 py-1.5 rounded-md bg-emerald-600 text-stone-950 text-xs font-bold hover:bg-emerald-500 whitespace-nowrap"
+                        >
+                          Next: {nextDay.name} →
+                        </button>
+                      )}
+                    </div>
+                  );
+                })()}
 
               {/* Add exercise */}
               {activeDay && (
