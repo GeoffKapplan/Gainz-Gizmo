@@ -288,6 +288,18 @@ function mkExercise(name) {
   };
 }
 
+const STRETCH_HOLD_SECONDS = 30;
+
+function mkStretch(name) {
+  return {
+    id: genId('st'),
+    name,
+    notes: '',
+    sets: [{ completed: false }],
+    history: [],
+  };
+}
+
 const MUSCLE_GROUPS = [
   'Chest', 'Back', 'Shoulders', 'Biceps', 'Triceps', 'Forearms', 'Quads', 'Hamstrings', 'Glutes', 'Core', 'Other',
 ];
@@ -309,6 +321,27 @@ const GROUP_COLORS = {
 
 function groupColor(group) {
   return GROUP_COLORS[group] || GROUP_COLORS.Other;
+}
+
+const BODY_AREAS = ['Neck', 'Shoulders', 'Chest', 'Back', 'Hips', 'Groin', 'Hamstrings', 'Quads', 'Calves', 'Full Body', 'Skills', 'Other'];
+
+const AREA_COLORS = {
+  Neck: { text: 'text-rose-300', bg: 'bg-rose-400/10', border: 'border-rose-400/40', left: 'border-l-rose-400', dot: 'bg-rose-400' },
+  Shoulders: { text: 'text-fuchsia-300', bg: 'bg-fuchsia-400/10', border: 'border-fuchsia-400/40', left: 'border-l-fuchsia-400', dot: 'bg-fuchsia-400' },
+  Chest: { text: 'text-pink-300', bg: 'bg-pink-400/10', border: 'border-pink-400/40', left: 'border-l-pink-400', dot: 'bg-pink-400' },
+  Back: { text: 'text-indigo-300', bg: 'bg-indigo-400/10', border: 'border-indigo-400/40', left: 'border-l-indigo-400', dot: 'bg-indigo-400' },
+  Hips: { text: 'text-violet-300', bg: 'bg-violet-400/10', border: 'border-violet-400/40', left: 'border-l-violet-400', dot: 'bg-violet-400' },
+  Groin: { text: 'text-emerald-300', bg: 'bg-emerald-400/10', border: 'border-emerald-400/40', left: 'border-l-emerald-400', dot: 'bg-emerald-400' },
+  Hamstrings: { text: 'text-purple-300', bg: 'bg-purple-400/10', border: 'border-purple-400/40', left: 'border-l-purple-400', dot: 'bg-purple-400' },
+  Quads: { text: 'text-blue-300', bg: 'bg-blue-400/10', border: 'border-blue-400/40', left: 'border-l-blue-400', dot: 'bg-blue-400' },
+  Calves: { text: 'text-sky-300', bg: 'bg-sky-400/10', border: 'border-sky-400/40', left: 'border-l-sky-400', dot: 'bg-sky-400' },
+  'Full Body': { text: 'text-teal-300', bg: 'bg-teal-400/10', border: 'border-teal-400/40', left: 'border-l-teal-400', dot: 'bg-teal-400' },
+  Skills: { text: 'text-amber-300', bg: 'bg-amber-400/10', border: 'border-amber-400/40', left: 'border-l-amber-400', dot: 'bg-amber-400' },
+  Other: { text: 'text-stone-400', bg: 'bg-stone-500/10', border: 'border-stone-500/40', left: 'border-l-stone-500', dot: 'bg-stone-500' },
+};
+
+function areaColor(area) {
+  return AREA_COLORS[area] || AREA_COLORS.Other;
 }
 
 function defaultData() {
@@ -454,6 +487,43 @@ function defaultData() {
     program: { order: days.slice(0, 4).map((d) => d.id), loggedIds: [] },
     sessionsCollapsed: false,
     activeDayId: days[0]?.id ?? null,
+    ...defaultFlexData(),
+  };
+}
+
+function defaultFlexData() {
+  const flexLibraryNames = [
+    ['Doorway Stretch', 'Chest'],
+    ['90/90 Hip Stretch', 'Hips'],
+    ['Pigeon Stretch', 'Hips'],
+    ['Butterfly Stretch', 'Groin'],
+    ['Pancake Stretch', 'Hamstrings'],
+    ['Standing Hamstring Stretch', 'Hamstrings'],
+    ['Couch Stretch', 'Quads'],
+    ['Butchers Block', 'Skills'],
+    ['Middle Splits', 'Skills'],
+    ['Thoracic Extension', 'Skills'],
+  ];
+  const flexDays = [
+    {
+      id: genId('day'),
+      name: 'Middle Split',
+      exercises: [
+        mkStretch('Standing Hamstring Stretch'),
+        mkStretch('Butterfly Stretch'),
+        mkStretch('Pancake Stretch'),
+        mkStretch('Pigeon Stretch'),
+        mkStretch('Middle Splits'),
+      ],
+      archived: [],
+    },
+  ];
+  return {
+    flexLibrary: flexLibraryNames.map(([name, area]) => ({ id: genId('lib'), name, area })),
+    flexDays,
+    flexProgram: { order: flexDays.map((d) => d.id), loggedIds: [] },
+    flexSessionsCollapsed: false,
+    flexActiveDayId: flexDays[0]?.id ?? null,
   };
 }
 
@@ -471,6 +541,25 @@ function normalize(parsed) {
   const order = savedOrder.filter((id) => dayIds.includes(id));
   const loggedIds = (parsed.program && parsed.program.loggedIds) || [];
   const activeDayId = dayIds.includes(parsed.activeDayId) ? parsed.activeDayId : dayIds[0] ?? null;
+
+  // Flexibility side: if this save predates the feature entirely, seed it fresh rather than
+  // leaving it empty, same as a first-ever install would get.
+  const hasFlex = Array.isArray(parsed.flexDays);
+  const flexSeed = hasFlex ? null : defaultFlexData();
+  const flexDays = hasFlex ? parsed.flexDays.map((d) => ({ ...d, archived: d.archived || [] })) : flexSeed.flexDays;
+  const flexDayIds = flexDays.map((d) => d.id);
+  const flexSavedOrder = hasFlex ? (parsed.flexProgram ? parsed.flexProgram.order || [] : flexDayIds) : flexSeed.flexProgram.order;
+  const flexOrder = flexSavedOrder.filter((id) => flexDayIds.includes(id));
+  const flexLoggedIds = hasFlex ? (parsed.flexProgram && parsed.flexProgram.loggedIds) || [] : [];
+  const flexActiveDayId = hasFlex
+    ? flexDayIds.includes(parsed.flexActiveDayId)
+      ? parsed.flexActiveDayId
+      : flexDayIds[0] ?? null
+    : flexSeed.flexActiveDayId;
+  const flexLibrary = hasFlex
+    ? (parsed.flexLibrary || []).map((l) => ({ ...l, area: BODY_AREAS.includes(l.area) ? l.area : 'Other' }))
+    : flexSeed.flexLibrary;
+
   return {
     library: (parsed.library || []).map((l) => ({
       ...l,
@@ -480,6 +569,11 @@ function normalize(parsed) {
     program: { order, loggedIds },
     sessionsCollapsed: typeof parsed.sessionsCollapsed === 'boolean' ? parsed.sessionsCollapsed : false,
     activeDayId,
+    flexLibrary,
+    flexDays,
+    flexProgram: { order: flexOrder, loggedIds: flexLoggedIds },
+    flexSessionsCollapsed: typeof parsed.flexSessionsCollapsed === 'boolean' ? parsed.flexSessionsCollapsed : false,
+    flexActiveDayId,
   };
 }
 
@@ -507,6 +601,47 @@ function summarizeSets(sets) {
     .filter((s) => s.weight !== '' || s.reps !== '')
     .map((s) => `${s.weight || '—'}×${s.reps || '—'}`)
     .join(', ');
+}
+
+// Stretch equivalents: a "set" is just a completed hold, no weight/reps involved.
+function meaningfulStretchSets(sets) {
+  return sets.filter((s) => s.completed);
+}
+
+function stretchSetsEqual(a, b) {
+  if (a.length !== b.length) return false;
+  return a.every((s, i) => s.completed === b[i].completed);
+}
+
+function summarizeStretchSets(sets) {
+  const n = sets.filter((s) => s.completed).length;
+  if (!n) return '';
+  return `${n} × ${STRETCH_HOLD_SECONDS}s hold${n > 1 ? 's' : ''}`;
+}
+
+// Scans every day (active + archived) for logged sessions under this exact stretch name.
+function getStretchStats(days, name) {
+  const lower = name.toLowerCase();
+  let sessions = 0;
+  let lastDate = null;
+  let longestSession = 0; // most holds completed in a single logged session
+
+  const consider = (ex) => {
+    if (ex.name.toLowerCase() !== lower) return;
+    ex.history.forEach((h) => {
+      sessions += 1;
+      if (!lastDate || new Date(h.date) > new Date(lastDate)) lastDate = h.date;
+      const completedCount = h.sets.filter((s) => s.completed).length;
+      if (completedCount > longestSession) longestSession = completedCount;
+    });
+  };
+
+  days.forEach((d) => {
+    d.exercises.forEach(consider);
+    (d.archived || []).forEach(consider);
+  });
+
+  return { sessions, lastDate, longestSession };
 }
 
 // Scans every day (active exercises + archived ones) for logged sets under this exact name
@@ -577,10 +712,10 @@ function getFullHistory(days, name) {
 
 function ExerciseTracker() {
   const [data, setData] = useState(null);
-  const [view, setView] = useState('log'); // 'log' | 'library'
+  const [view, setView] = useState('log'); // 'log' | 'library' | 'flexLog' | 'flexLibrary'
   const [loaded, setLoaded] = useState(false);
   const [saveState, setSaveState] = useState('idle');
-  const [openNotes, setOpenNotes] = useState({});
+  const [openNotes, setOpenNotes] = useState({}); // shared across both sections -- exercise/stretch ids never collide
   const [openHistory, setOpenHistory] = useState({});
   const [editingDayId, setEditingDayId] = useState(null);
   const [editingDayName, setEditingDayName] = useState('');
@@ -604,6 +739,33 @@ function ExerciseTracker() {
   const programDragState = useRef(null);
   const justDraggedProgramRef = useRef(false); // suppresses the program chip's click-to-select right after a drag
   const saveTimeout = useRef(null);
+
+  // --- Flexibility side: its own day list, program, and drag state, kept separate from the
+  // strength side above since they have their own Sessions row / Active Program row (their
+  // own DOM containers to query for drag positions). Notes/history toggles, the confirm/toast
+  // system, and swap/add-exercise/day-edit forms are shared -- ids never collide between the
+  // two sections, and only one section's UI is visible at a time anyway.
+  const [editingFlexDayId, setEditingFlexDayId] = useState(null);
+  const [editingFlexDayName, setEditingFlexDayName] = useState('');
+  const [addingFlexExerciseFor, setAddingFlexExerciseFor] = useState(null);
+  const [flexSwapId, setFlexSwapId] = useState(null);
+  const [addingFlexDay, setAddingFlexDay] = useState(false);
+  const [newFlexDayName, setNewFlexDayName] = useState('');
+  const [flexPrName, setFlexPrName] = useState(null);
+  const [draggingFlexExerciseId, setDraggingFlexExerciseId] = useState(null);
+  const [draggingFlexDayId, setDraggingFlexDayId] = useState(null);
+  const [draggingFlexProgramId, setDraggingFlexProgramId] = useState(null);
+  const [flexProgramDropHover, setFlexProgramDropHover] = useState(false);
+  const [activeTimers, setActiveTimers] = useState({}); // key: `${exId}:${setIdx}` -> seconds remaining
+  const flexExerciseListRef = useRef(null);
+  const flexExerciseDragState = useRef(null);
+  const flexDayTabsRef = useRef(null);
+  const flexDayDragState = useRef(null);
+  const flexJustDraggedDayRef = useRef(false);
+  const flexProgramListRef = useRef(null);
+  const flexProgramDragState = useRef(null);
+  const flexJustDraggedProgramRef = useRef(false);
+
 
   const askConfirm = (message, onConfirm, confirmLabel = 'Delete') => setConfirm({ message, onConfirm, confirmLabel });
 
@@ -665,6 +827,16 @@ function ExerciseTracker() {
       programDragState.current = null;
       setDraggingProgramId(null);
       setProgramDropHover(false);
+
+      flexExerciseDragState.current = null;
+      setDraggingFlexExerciseId(null);
+      if (flexDayDragState.current) clearTimeout(flexDayDragState.current.timer);
+      flexDayDragState.current = null;
+      setDraggingFlexDayId(null);
+      if (flexProgramDragState.current) clearTimeout(flexProgramDragState.current.timer);
+      flexProgramDragState.current = null;
+      setDraggingFlexProgramId(null);
+      setFlexProgramDropHover(false);
     };
     window.addEventListener('pointerup', clearAllDragState);
     window.addEventListener('pointercancel', clearAllDragState);
@@ -673,6 +845,44 @@ function ExerciseTracker() {
       window.removeEventListener('pointercancel', clearAllDragState);
     };
   }, []);
+
+  // Ticks every active stretch timer down once a second; when one hits zero it auto-marks
+  // that set complete and clears itself out. Timers are purely ephemeral UI state -- they
+  // don't survive a reload, same as any in-progress (unsaved) rest timer wouldn't.
+  useEffect(() => {
+    if (Object.keys(activeTimers).length === 0) return;
+    const interval = setInterval(() => {
+      setActiveTimers((prev) => {
+        const next = { ...prev };
+        Object.entries(prev).forEach(([key, secondsLeft]) => {
+          if (secondsLeft <= 1) {
+            delete next[key];
+            const [dayId, exId, idxStr] = key.split(':');
+            const idx = Number(idxStr);
+            setData((prevData) => ({
+              ...prevData,
+              flexDays: prevData.flexDays.map((d) =>
+                d.id !== dayId
+                  ? d
+                  : {
+                      ...d,
+                      exercises: d.exercises.map((ex) =>
+                        ex.id !== exId
+                          ? ex
+                          : { ...ex, sets: ex.sets.map((s, i) => (i === idx ? { ...s, completed: true } : s)) }
+                      ),
+                    }
+              ),
+            }));
+          } else {
+            next[key] = secondsLeft - 1;
+          }
+        });
+        return next;
+      });
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [activeTimers]);
 
   if (!loaded || !data) {
     return (
@@ -702,6 +912,54 @@ function ExerciseTracker() {
   const groupForName = (name) => {
     const match = data.library.find((l) => l.name.toLowerCase() === name.toLowerCase());
     return match?.muscleGroup || 'Other';
+  };
+
+  // --- Flexibility side equivalents ---
+  const activeFlexDay = data.flexDays.find((d) => d.id === data.flexActiveDayId) || data.flexDays[0];
+
+  const setActiveFlexDayId = (id) => setData((prev) => ({ ...prev, flexActiveDayId: id }));
+
+  const advanceToNextFlexDay = (dayId) => {
+    const idx = data.flexProgram.order.indexOf(dayId);
+    if (idx === -1) return;
+    const nextId = data.flexProgram.order[(idx + 1) % data.flexProgram.order.length];
+    setActiveFlexDayId(nextId);
+  };
+
+  const areaForName = (name) => {
+    const match = data.flexLibrary.find((l) => l.name.toLowerCase() === name.toLowerCase());
+    return match?.area || 'Other';
+  };
+
+  // Begins a 30s countdown for one specific set; it auto-completes via the ticking effect above.
+  const startTimer = (dayId, exId, idx) => {
+    setActiveTimers((prev) => ({ ...prev, [`${dayId}:${exId}:${idx}`]: STRETCH_HOLD_SECONDS }));
+  };
+
+  const cancelTimer = (dayId, exId, idx) => {
+    setActiveTimers((prev) => {
+      const next = { ...prev };
+      delete next[`${dayId}:${exId}:${idx}`];
+      return next;
+    });
+  };
+
+  const updateFlexExercise = (dayId, exId, fn) => {
+    setData((prev) => ({
+      ...prev,
+      flexDays: prev.flexDays.map((d) =>
+        d.id !== dayId ? d : { ...d, exercises: d.exercises.map((ex) => (ex.id === exId ? fn(ex) : ex)) }
+      ),
+    }));
+  };
+
+  // Manual tap-to-complete/uncomplete -- the alternative to running the timer to completion.
+  const toggleFlexSetComplete = (dayId, exId, idx) => {
+    cancelTimer(dayId, exId, idx);
+    updateFlexExercise(dayId, exId, (ex) => ({
+      ...ex,
+      sets: ex.sets.map((s, i) => (i === idx ? { ...s, completed: !s.completed } : s)),
+    }));
   };
 
   const updateDay = (dayId, fn) => {
@@ -963,8 +1221,10 @@ function ExerciseTracker() {
     });
   };
 
-  const removeFromLibrary = (id) => {
-    setData((prev) => ({ ...prev, library: prev.library.filter((l) => l.id !== id) }));
+  const removeFromLibrary = (id, name) => {
+    askConfirm(`Remove "${name}" from your library? Any logs already recorded under that name stay untouched.`, () => {
+      setData((prev) => ({ ...prev, library: prev.library.filter((l) => l.id !== id) }));
+    });
   };
 
   const updateLibraryGroup = (id, muscleGroup) => {
@@ -1185,6 +1445,418 @@ function ExerciseTracker() {
     });
   };
 
+  // ============================================================
+  // Flexibility side — same shapes and behaviors as strength above, adapted for
+  // timer/checkbox sets instead of weight/reps, and body-area categories instead of
+  // muscle groups.
+  // ============================================================
+
+  const updateFlexDay = (dayId, fn) => {
+    setData((prev) => ({
+      ...prev,
+      flexDays: prev.flexDays.map((d) => (d.id === dayId ? fn(d) : d)),
+    }));
+  };
+
+  const reorderFlexExercises = (dayId, fromIndex, toIndex) => {
+    updateFlexDay(dayId, (d) => ({ ...d, exercises: moveItem(d.exercises, fromIndex, toIndex) }));
+  };
+
+  const reorderFlexDays = (fromIndex, toIndex) => {
+    setData((prev) => ({ ...prev, flexDays: moveItem(prev.flexDays, fromIndex, toIndex) }));
+  };
+
+  const handleFlexExercisePointerDown = (id) => (e) => {
+    e.preventDefault();
+    flexExerciseDragState.current = { id };
+    setDraggingFlexExerciseId(id);
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch (_) {}
+  };
+
+  const handleFlexExercisePointerMove = (e) => {
+    const st = flexExerciseDragState.current;
+    if (!st || !flexExerciseListRef.current || !activeFlexDay) return;
+    const els = Array.from(flexExerciseListRef.current.querySelectorAll('[data-sort-id]'));
+    const currentIndex = activeFlexDay.exercises.findIndex((ex) => ex.id === st.id);
+    if (currentIndex === -1) return;
+    let targetIndex = els.length - 1;
+    for (let i = 0; i < els.length; i++) {
+      const rect = els[i].getBoundingClientRect();
+      if (e.clientY < rect.top + rect.height / 2) {
+        targetIndex = i;
+        break;
+      }
+    }
+    if (targetIndex !== currentIndex) reorderFlexExercises(activeFlexDay.id, currentIndex, targetIndex);
+  };
+
+  const handleFlexExercisePointerUp = () => {
+    flexExerciseDragState.current = null;
+    setDraggingFlexExerciseId(null);
+  };
+
+  const handleFlexDayPointerDown = (id) => (e) => {
+    const pointerId = e.pointerId;
+    const el = e.currentTarget;
+    const startX = e.clientX;
+    const startY = e.clientY;
+    const timer = setTimeout(() => {
+      const st = flexDayDragState.current;
+      if (!st) return;
+      st.dragging = true;
+      setDraggingFlexDayId(id);
+      flexJustDraggedDayRef.current = true;
+      try {
+        el.setPointerCapture(pointerId);
+      } catch (_) {}
+    }, 500);
+    flexDayDragState.current = { id, startX, startY, timer, dragging: false, el, pointerId };
+  };
+
+  const handleFlexDayPointerMove = (e) => {
+    const st = flexDayDragState.current;
+    if (!st) return;
+
+    if (!st.dragging) {
+      const dx = e.clientX - st.startX;
+      const dy = e.clientY - st.startY;
+      if (Math.hypot(dx, dy) > 10) {
+        if (Math.abs(dy) > Math.abs(dx)) {
+          clearTimeout(st.timer);
+          st.dragging = true;
+          setDraggingFlexDayId(st.id);
+          flexJustDraggedDayRef.current = true;
+          try {
+            st.el.setPointerCapture(st.pointerId);
+          } catch (_) {}
+        } else {
+          clearTimeout(st.timer);
+          flexDayDragState.current = null;
+          return;
+        }
+      } else {
+        return;
+      }
+    }
+
+    if (e.cancelable) e.preventDefault();
+
+    if (flexProgramListRef.current) {
+      const rect = flexProgramListRef.current.getBoundingClientRect();
+      const overProgram = e.clientY >= rect.top && e.clientY <= rect.bottom;
+      if (overProgram) {
+        setFlexProgramDropHover(true);
+        return;
+      }
+      if (flexProgramDropHover) setFlexProgramDropHover(false);
+    }
+
+    if (!flexDayTabsRef.current) return;
+    const els = Array.from(flexDayTabsRef.current.querySelectorAll('[data-sort-id]'));
+    const currentIndex = data.flexDays.findIndex((d) => d.id === st.id);
+    if (currentIndex === -1) return;
+    let targetIndex = els.length - 1;
+    for (let i = 0; i < els.length; i++) {
+      const rect = els[i].getBoundingClientRect();
+      if (e.clientX < rect.left + rect.width / 2) {
+        targetIndex = i;
+        break;
+      }
+    }
+    if (targetIndex !== currentIndex) {
+      reorderFlexDays(currentIndex, targetIndex);
+    }
+  };
+
+  const handleFlexDayPointerUp = () => {
+    const st = flexDayDragState.current;
+    if (st && !st.dragging) {
+      clearTimeout(st.timer);
+    }
+    if (st && st.dragging && flexProgramDropHover) {
+      addToFlexProgram(st.id);
+    }
+    setFlexProgramDropHover(false);
+    flexDayDragState.current = null;
+    setDraggingFlexDayId(null);
+    setTimeout(() => {
+      flexJustDraggedDayRef.current = false;
+    }, 50);
+  };
+
+  const removeFromFlexProgram = (dayId, dayName) => {
+    askConfirm(
+      `Remove "${dayName}" from the active program? You can drag it back in from Sessions anytime.`,
+      () => {
+        setData((prev) => ({ ...prev, flexProgram: { ...prev.flexProgram, order: prev.flexProgram.order.filter((id) => id !== dayId) } }));
+      },
+      'Remove'
+    );
+  };
+
+  const addToFlexProgram = (dayId) => {
+    setData((prev) =>
+      prev.flexProgram.order.includes(dayId)
+        ? prev
+        : { ...prev, flexProgram: { ...prev.flexProgram, order: [...prev.flexProgram.order, dayId] } }
+    );
+  };
+
+  const handleFlexProgramPointerDown = (id) => (e) => {
+    const pointerId = e.pointerId;
+    const el = e.currentTarget;
+    const startX = e.clientX;
+    const startY = e.clientY;
+    const timer = setTimeout(() => {
+      const st = flexProgramDragState.current;
+      if (!st) return;
+      st.dragging = true;
+      setDraggingFlexProgramId(id);
+      flexJustDraggedProgramRef.current = true;
+      try {
+        el.setPointerCapture(pointerId);
+      } catch (_) {}
+    }, 500);
+    flexProgramDragState.current = { id, startX, startY, timer, dragging: false };
+  };
+
+  const handleFlexProgramPointerMove = (e) => {
+    const st = flexProgramDragState.current;
+    if (!st) return;
+
+    if (!st.dragging) {
+      if (Math.hypot(e.clientX - st.startX, e.clientY - st.startY) > 10) {
+        clearTimeout(st.timer);
+        flexProgramDragState.current = null;
+      }
+      return;
+    }
+
+    if (e.cancelable) e.preventDefault();
+    if (!flexProgramListRef.current) return;
+    const els = Array.from(flexProgramListRef.current.querySelectorAll('[data-sort-id]'));
+    const currentIndex = data.flexProgram.order.findIndex((id) => id === st.id);
+    if (currentIndex === -1) return;
+    let targetIndex = els.length - 1;
+    for (let i = 0; i < els.length; i++) {
+      const rect = els[i].getBoundingClientRect();
+      if (e.clientX < rect.left + rect.width / 2) {
+        targetIndex = i;
+        break;
+      }
+    }
+    if (targetIndex !== currentIndex) {
+      setData((prev) => ({ ...prev, flexProgram: { ...prev.flexProgram, order: moveItem(prev.flexProgram.order, currentIndex, targetIndex) } }));
+    }
+  };
+
+  const handleFlexProgramPointerUp = () => {
+    const st = flexProgramDragState.current;
+    if (st && !st.dragging) {
+      clearTimeout(st.timer);
+    }
+    flexProgramDragState.current = null;
+    setDraggingFlexProgramId(null);
+    setTimeout(() => {
+      flexJustDraggedProgramRef.current = false;
+    }, 50);
+  };
+
+  const handleResetFlexCycle = () => {
+    askConfirm(
+      "Reset the current cycle? This clears completion marks — your logged history stays intact.",
+      () => setData((prev) => ({ ...prev, flexProgram: { ...prev.flexProgram, loggedIds: [] } })),
+      'Reset'
+    );
+  };
+
+  const addToFlexLibrary = (name, area = 'Other') => {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    setData((prev) => {
+      const exists = prev.flexLibrary.some((l) => l.name.toLowerCase() === trimmed.toLowerCase());
+      if (exists) return prev;
+      return { ...prev, flexLibrary: [...prev.flexLibrary, { id: genId('lib'), name: trimmed, area }] };
+    });
+  };
+
+  const removeFromFlexLibrary = (id, name) => {
+    askConfirm(`Remove "${name}" from your library? Any logs already recorded under that name stay untouched.`, () => {
+      setData((prev) => ({ ...prev, flexLibrary: prev.flexLibrary.filter((l) => l.id !== id) }));
+    });
+  };
+
+  const updateFlexLibraryArea = (id, area) => {
+    setData((prev) => ({ ...prev, flexLibrary: prev.flexLibrary.map((l) => (l.id === id ? { ...l, area } : l)) }));
+  };
+
+  const addFlexSet = (dayId, exId) => {
+    updateFlexExercise(dayId, exId, (ex) => ({ ...ex, sets: [...ex.sets, { completed: false }] }));
+  };
+
+  const removeFlexSet = (dayId, exId, idx) => {
+    cancelTimer(dayId, exId, idx);
+    updateFlexExercise(dayId, exId, (ex) => {
+      if (ex.sets.length <= 1) return { ...ex, sets: [{ completed: false }] };
+      return { ...ex, sets: ex.sets.filter((_, i) => i !== idx) };
+    });
+  };
+
+  const clearFlexSets = (dayId, exId) => {
+    updateFlexExercise(dayId, exId, (ex) => ({ ...ex, sets: [{ completed: false }] }));
+  };
+
+  const updateFlexNotes = (dayId, exId, text) => {
+    updateFlexExercise(dayId, exId, (ex) => ({ ...ex, notes: text }));
+  };
+
+  const logFlexSession = (dayId, exId) => {
+    const day = data.flexDays.find((d) => d.id === dayId);
+    const ex = day?.exercises.find((e) => e.id === exId);
+    if (!ex) return;
+    const meaningful = meaningfulStretchSets(ex.sets);
+    if (!meaningful.length) return;
+
+    const updatedEx = {
+      ...ex,
+      history: [{ id: genId('log'), date: new Date().toISOString(), sets: meaningful }, ...ex.history],
+    };
+    const updatedDays = data.flexDays.map((d) =>
+      d.id === dayId ? { ...d, exercises: d.exercises.map((e) => (e.id === exId ? updatedEx : e)) } : d
+    );
+    const loggedIds = data.flexProgram.loggedIds.includes(exId)
+      ? data.flexProgram.loggedIds
+      : [...data.flexProgram.loggedIds, exId];
+    const cycleComplete =
+      data.flexProgram.order.length > 0 &&
+      data.flexProgram.order.every((id) => {
+        const d = updatedDays.find((dd) => dd.id === id);
+        return d && dayIsComplete(d, loggedIds);
+      });
+
+    setData((prev) => ({
+      ...prev,
+      flexDays: prev.flexDays.map((d) =>
+        d.id === dayId ? { ...d, exercises: d.exercises.map((e) => (e.id === exId ? updatedEx : e)) } : d
+      ),
+      flexProgram: { ...prev.flexProgram, loggedIds: cycleComplete ? [] : loggedIds },
+    }));
+
+    if (cycleComplete) {
+      showToast('Flexibility cycle complete — reset for the next round');
+    }
+  };
+
+  const editFlexHistoryEntry = (dayId, exId, entryId) => {
+    updateFlexExercise(dayId, exId, (ex) => {
+      const entry = ex.history.find((h) => h.id === entryId);
+      if (!entry) return ex;
+      return {
+        ...ex,
+        sets: entry.sets.length ? entry.sets.map((s) => ({ completed: s.completed })) : [{ completed: false }],
+        history: ex.history.filter((h) => h.id !== entryId),
+      };
+    });
+  };
+
+  const deleteFlexHistoryEntry = (dayId, exId, entryId, dateLabel) => {
+    askConfirm(`Delete the log from ${dateLabel}? This can't be undone.`, () => {
+      updateFlexExercise(dayId, exId, (ex) => ({ ...ex, history: ex.history.filter((h) => h.id !== entryId) }));
+    });
+  };
+
+  const archiveAndSwapFlex = (dayId, exId, newName) => {
+    updateFlexDay(dayId, (d) => {
+      const idx = d.exercises.findIndex((e) => e.id === exId);
+      if (idx === -1) return d;
+      const old = d.exercises[idx];
+      const fresh = mkStretch(newName);
+      const exercises = [...d.exercises];
+      exercises[idx] = fresh;
+      return { ...d, exercises, archived: [old, ...(d.archived || [])] };
+    });
+  };
+
+  const restoreFlexExercise = (dayId, archivedId) => {
+    updateFlexDay(dayId, (d) => {
+      const archived = d.archived || [];
+      const idx = archived.findIndex((e) => e.id === archivedId);
+      if (idx === -1) return d;
+      const ex = archived[idx];
+      return { ...d, exercises: [...d.exercises, ex], archived: archived.filter((e) => e.id !== archivedId) };
+    });
+  };
+
+  const deleteFlexArchived = (dayId, archivedId, name) => {
+    askConfirm(`Permanently delete archived "${name}"? This can't be undone.`, () => {
+      updateFlexDay(dayId, (d) => ({ ...d, archived: (d.archived || []).filter((e) => e.id !== archivedId) }));
+    });
+  };
+
+  const archiveFlexExercise = (dayId, exId) => {
+    updateFlexDay(dayId, (d) => {
+      const idx = d.exercises.findIndex((e) => e.id === exId);
+      if (idx === -1) return d;
+      const ex = d.exercises[idx];
+      return { ...d, exercises: d.exercises.filter((e) => e.id !== exId), archived: [ex, ...(d.archived || [])] };
+    });
+  };
+
+  const deleteFlexExercise = (dayId, exId, name) => {
+    askConfirm(
+      `Archive "${name}"? You'll find it under this stretch in the Flex Library tab, and can restore it anytime.`,
+      () => archiveFlexExercise(dayId, exId),
+      'Archive'
+    );
+  };
+
+  const addFlexExercise = (dayId, name) => {
+    updateFlexDay(dayId, (d) => ({ ...d, exercises: [...d.exercises, mkStretch(name)] }));
+    setAddingFlexExerciseFor(null);
+  };
+
+  const addFlexDay = () => {
+    const name = newFlexDayName.trim();
+    if (!name) return;
+    const id = genId('day');
+    setData((prev) => ({
+      ...prev,
+      flexDays: [...prev.flexDays, { id, name, exercises: [], archived: [] }],
+      flexProgram: { ...prev.flexProgram, order: [...prev.flexProgram.order, id] },
+    }));
+    setActiveFlexDayId(id);
+    setNewFlexDayName('');
+    setAddingFlexDay(false);
+  };
+
+  const startRenameFlexDay = (dayId, currentName) => {
+    setEditingFlexDayId(dayId);
+    setEditingFlexDayName(currentName);
+  };
+
+  const confirmRenameFlexDay = (dayId) => {
+    const name = editingFlexDayName.trim();
+    if (name) {
+      setData((prev) => ({ ...prev, flexDays: prev.flexDays.map((d) => (d.id === dayId ? { ...d, name } : d)) }));
+    }
+    setEditingFlexDayId(null);
+  };
+
+  const deleteFlexDay = (dayId, name) => {
+    if (data.flexDays.length <= 1) return;
+    askConfirm(`Delete "${name}" and everything logged for it?`, () => {
+      const remaining = data.flexDays.filter((d) => d.id !== dayId);
+      setData((prev) => ({
+        ...prev,
+        flexDays: remaining,
+        flexProgram: { ...prev.flexProgram, order: prev.flexProgram.order.filter((id) => id !== dayId) },
+      }));
+      if (data.flexActiveDayId === dayId) setActiveFlexDayId(remaining[0]?.id ?? null);
+    });
+  };
+
   return (
     <div className="min-h-screen bg-stone-950 text-stone-100">
       <style>{`
@@ -1206,7 +1878,7 @@ function ExerciseTracker() {
         </div>
 
         {/* View switcher */}
-        <div className="flex items-center gap-1 mb-5 bg-stone-900 rounded-md p-1 w-fit">
+        <div className="flex items-center gap-1 mb-5 bg-stone-900 rounded-md p-1 w-fit flex-wrap">
           <button
             onClick={() => setView('log')}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-bold uppercase tracking-wide transition-colors ${
@@ -1223,11 +1895,30 @@ function ExerciseTracker() {
           >
             <LibraryIcon className="w-3.5 h-3.5" /> Library ({data.library.length})
           </button>
+          <button
+            onClick={() => setView('flexLog')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-bold uppercase tracking-wide transition-colors ${
+              view === 'flexLog' ? 'bg-violet-400 text-stone-950' : 'text-stone-500 hover:text-stone-300'
+            }`}
+          >
+            <RefreshCw className="w-3.5 h-3.5" /> Flexibility
+          </button>
+          <button
+            onClick={() => setView('flexLibrary')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-bold uppercase tracking-wide transition-colors ${
+              view === 'flexLibrary' ? 'bg-violet-400 text-stone-950' : 'text-stone-500 hover:text-stone-300'
+            }`}
+          >
+            <LibraryIcon className="w-3.5 h-3.5" /> Flex Library ({data.flexLibrary.length})
+          </button>
         </div>
 
         {view === 'library' ? (
           <LibraryView
             library={data.library}
+            categories={MUSCLE_GROUPS}
+            colorFn={groupColor}
+            categoryField="muscleGroup"
             onAdd={addToLibrary}
             onRemove={removeFromLibrary}
             onSelect={setPrName}
@@ -1235,7 +1926,518 @@ function ExerciseTracker() {
             onExport={exportData}
             onImportParsed={importData}
             onImportError={(msg) => showToast(msg, 'error')}
+            showBackup
           />
+        ) : view === 'flexLibrary' ? (
+          <LibraryView
+            library={data.flexLibrary}
+            categories={BODY_AREAS}
+            colorFn={areaColor}
+            categoryField="area"
+            onAdd={addToFlexLibrary}
+            onRemove={removeFromFlexLibrary}
+            onSelect={setFlexPrName}
+            onUpdateGroup={updateFlexLibraryArea}
+            accent="violet"
+            itemLabel="stretch"
+          />
+        ) : view === 'flexLog' ? (
+          <>
+            {/* Day tabs */}
+            <button
+              onClick={() => setData((prev) => ({ ...prev, flexSessionsCollapsed: !prev.flexSessionsCollapsed }))}
+              className="flex items-center gap-1 text-[11px] font-bold uppercase tracking-wide text-stone-500 hover:text-stone-300 mb-1.5"
+            >
+              {data.flexSessionsCollapsed ? <ChevronDown className="w-3 h-3" /> : <ChevronUp className="w-3 h-3" />}
+              Sessions
+            </button>
+            {!data.flexSessionsCollapsed && (
+            <div ref={flexDayTabsRef} className="flex items-center gap-1.5 overflow-x-auto pb-1 mb-5 -mx-1 px-1">
+              {data.flexDays.map((d) => (
+                <button
+                  key={d.id}
+                  data-sort-id={d.id}
+                  onPointerDown={handleFlexDayPointerDown(d.id)}
+                  onPointerMove={handleFlexDayPointerMove}
+                  onPointerUp={handleFlexDayPointerUp}
+                  onPointerCancel={handleFlexDayPointerUp}
+                  onClick={() => {
+                    if (flexJustDraggedDayRef.current) return;
+                    setActiveFlexDayId(d.id);
+                  }}
+                  className={`shrink-0 px-3.5 py-2 rounded-md text-sm font-bold uppercase tracking-wide transition-all select-none ${
+                    d.id === data.flexActiveDayId
+                      ? 'bg-violet-400 text-stone-950'
+                      : 'bg-stone-900 text-stone-400 hover:bg-stone-800 hover:text-stone-200'
+                  } ${draggingFlexDayId === d.id ? 'opacity-70 ring-2 ring-violet-300 scale-105' : ''}`}
+                >
+                  {d.name}
+                </button>
+              ))}
+              {addingFlexDay ? (
+                <div className="shrink-0 flex items-center gap-1 bg-stone-900 rounded-md px-2 py-1">
+                  <input
+                    autoFocus
+                    value={newFlexDayName}
+                    onChange={(e) => setNewFlexDayName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') addFlexDay();
+                      if (e.key === 'Escape') setAddingFlexDay(false);
+                    }}
+                    placeholder="Day name"
+                    className="bg-transparent text-sm text-stone-100 placeholder-stone-600 outline-none w-24"
+                  />
+                  <button onClick={addFlexDay} className="text-violet-300 hover:text-violet-400">
+                    <Check className="w-4 h-4" />
+                  </button>
+                  <button onClick={() => setAddingFlexDay(false)} className="text-stone-600 hover:text-stone-400">
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => setAddingFlexDay(true)}
+                  className="shrink-0 w-9 h-9 flex items-center justify-center rounded-md bg-stone-900 text-stone-500 hover:bg-stone-800 hover:text-stone-300"
+                  aria-label="Add day"
+                >
+                  <Plus className="w-4 h-4" />
+                </button>
+              )}
+            </div>
+            )}
+
+            {/* Active Program */}
+            {data.flexDays.length > 0 && (
+              <div className="mb-5">
+                <div className="flex items-center justify-between mb-1.5">
+                  <p className="text-[11px] font-bold uppercase tracking-wide text-stone-500">
+                    Active Program{' '}
+                    <span className="text-stone-700">
+                      ({data.flexProgram.order.filter((id) => {
+                        const d = data.flexDays.find((dd) => dd.id === id);
+                        return d && dayIsComplete(d, data.flexProgram.loggedIds);
+                      }).length}
+                      /{data.flexProgram.order.length} complete)
+                    </span>
+                  </p>
+                  {data.flexProgram.loggedIds.length > 0 && (
+                    <button
+                      onClick={handleResetFlexCycle}
+                      className="flex items-center gap-1 text-[11px] text-stone-600 hover:text-red-500"
+                    >
+                      <RefreshCw className="w-3 h-3" /> Reset cycle
+                    </button>
+                  )}
+                </div>
+                <div
+                  ref={flexProgramListRef}
+                  style={{ minHeight: '2.75rem' }}
+                  className={`flex items-center gap-1.5 overflow-x-auto pb-1 -mx-1 px-1 rounded-md transition-colors ${
+                    flexProgramDropHover ? 'bg-violet-500/10 ring-2 ring-violet-500/50' : ''
+                  }`}
+                >
+                  {data.flexProgram.order.map((dayId) => {
+                    const day = data.flexDays.find((d) => d.id === dayId);
+                    if (!day) return null;
+                    const complete = dayIsComplete(day, data.flexProgram.loggedIds);
+                    const isSelected = dayId === data.flexActiveDayId;
+                    return (
+                      <div
+                        key={dayId}
+                        data-sort-id={dayId}
+                        className={`shrink-0 flex items-center rounded-md text-sm font-bold uppercase tracking-wide border transition-all select-none ${
+                          complete
+                            ? 'bg-emerald-500/10 border-emerald-500/40 text-emerald-400'
+                            : 'bg-stone-900 border-stone-800 text-stone-400'
+                        } ${isSelected ? 'ring-2 ring-violet-300' : ''} ${
+                          draggingFlexProgramId === dayId ? 'opacity-70 ring-2 ring-violet-300 scale-105' : ''
+                        }`}
+                      >
+                        <button
+                          onPointerDown={handleFlexProgramPointerDown(dayId)}
+                          onPointerMove={handleFlexProgramPointerMove}
+                          onPointerUp={handleFlexProgramPointerUp}
+                          onPointerCancel={handleFlexProgramPointerUp}
+                          onClick={() => {
+                            if (flexJustDraggedProgramRef.current) return;
+                            setActiveFlexDayId(dayId);
+                          }}
+                          className="pl-3 pr-1 py-2 flex items-center gap-1.5"
+                        >
+                          {complete && <Check className="w-3.5 h-3.5" />}
+                          {day.name}
+                        </button>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            removeFromFlexProgram(dayId, day.name);
+                          }}
+                          className="pl-1 pr-2 py-2 opacity-60 hover:opacity-100"
+                          aria-label={`Remove ${day.name} from program`}
+                          title="Remove from program"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Active day controls */}
+            {activeFlexDay && (
+              <div className="flex items-center justify-between mb-3">
+                {editingFlexDayId === activeFlexDay.id ? (
+                  <div className="flex items-center gap-1.5">
+                    <input
+                      autoFocus
+                      value={editingFlexDayName}
+                      onChange={(e) => setEditingFlexDayName(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') confirmRenameFlexDay(activeFlexDay.id);
+                        if (e.key === 'Escape') setEditingFlexDayId(null);
+                      }}
+                      className="bg-stone-900 border border-stone-700 rounded px-2 py-1 text-sm text-stone-100 outline-none focus:border-violet-600"
+                    />
+                    <button onClick={() => confirmRenameFlexDay(activeFlexDay.id)} className="text-violet-300 hover:text-violet-400">
+                      <Check className="w-4 h-4" />
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => startRenameFlexDay(activeFlexDay.id, activeFlexDay.name)}
+                    className="flex items-center gap-1.5 text-stone-500 hover:text-stone-300 text-xs"
+                  >
+                    <Pencil className="w-3 h-3" /> Rename day
+                  </button>
+                )}
+                <button
+                  onClick={() => deleteFlexDay(activeFlexDay.id, activeFlexDay.name)}
+                  disabled={data.flexDays.length <= 1}
+                  title={data.flexDays.length <= 1 ? 'Add another day before deleting this one' : undefined}
+                  className={`flex items-center gap-1.5 text-xs ${
+                    data.flexDays.length <= 1 ? 'text-stone-800 cursor-not-allowed' : 'text-stone-600 hover:text-red-500'
+                  }`}
+                >
+                  <Trash2 className="w-3 h-3" /> Delete day
+                </button>
+              </div>
+            )}
+
+            {/* Exercises */}
+            <div className="space-y-3">
+              {activeFlexDay && activeFlexDay.exercises.length === 0 && (
+                <div className="text-center py-10 text-stone-600 text-sm border border-dashed border-stone-800 rounded-lg">
+                  No stretches yet. Add your first one below.
+                </div>
+              )}
+
+              {activeFlexDay && activeFlexDay.exercises.length > 0 && (
+                <div ref={flexExerciseListRef} className="space-y-3">
+                  {activeFlexDay.exercises.map((ex) => {
+                    const gc = areaColor(areaForName(ex.name));
+                    return (
+                      <div
+                        key={ex.id}
+                        data-sort-id={ex.id}
+                        className={`bg-stone-900 rounded-lg border border-stone-800 ${gc.left} border-l-4 overflow-hidden ${
+                          draggingFlexExerciseId === ex.id ? 'opacity-60 ring-2 ring-violet-300' : ''
+                        }`}
+                      >
+                    {/* Exercise header */}
+                    <div className="px-3.5 pt-3 pb-2">
+                      {flexSwapId === ex.id ? (
+                        <ExercisePicker
+                          library={data.flexLibrary}
+                          categories={BODY_AREAS}
+                          colorFn={areaColor}
+                          categoryField="area"
+                          libraryTabLabel="Flex Library"
+                          initialValue=""
+                          placeholder={`Replace "${ex.name}" with…`}
+                          onChoose={(name) => {
+                            archiveAndSwapFlex(activeFlexDay.id, ex.id, name);
+                            setFlexSwapId(null);
+                          }}
+                          onCancel={() => setFlexSwapId(null)}
+                          onGoToLibrary={() => {
+                            setFlexSwapId(null);
+                            setView('flexLibrary');
+                          }}
+                        />
+                      ) : (
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <button
+                              onPointerDown={handleFlexExercisePointerDown(ex.id)}
+                              onPointerMove={handleFlexExercisePointerMove}
+                              onPointerUp={handleFlexExercisePointerUp}
+                              onPointerCancel={handleFlexExercisePointerUp}
+                              style={{ touchAction: 'none' }}
+                              className="text-stone-600 hover:text-stone-400 cursor-grab active:cursor-grabbing shrink-0 -ml-1"
+                              aria-label={`Reorder ${ex.name}`}
+                            >
+                              <GripVertical className="w-4 h-4" />
+                            </button>
+                            <MarqueeText text={ex.name} className="font-bold text-stone-100 text-[15px]" />
+                            <span
+                              className={`shrink-0 text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded border ${gc.bg} ${gc.text} ${gc.border}`}
+                            >
+                              {areaForName(ex.name)}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-0.5 shrink-0">
+                            <IconButton onClick={() => setFlexSwapId(ex.id)} label="Swap stretch">
+                              <RefreshCw className="w-3.5 h-3.5" />
+                            </IconButton>
+                            <IconButton
+                              onClick={() => toggleNotes(ex.id)}
+                              label="Notes"
+                              active={openNotes[ex.id]}
+                              dot={!!ex.notes.trim()}
+                            >
+                              <StickyNote className="w-3.5 h-3.5" />
+                            </IconButton>
+                            <IconButton
+                              onClick={() => toggleHistory(ex.id)}
+                              label="History"
+                              active={openHistory[ex.id]}
+                            >
+                              <HistoryIcon className="w-3.5 h-3.5" />
+                            </IconButton>
+                            <IconButton onClick={() => deleteFlexExercise(activeFlexDay.id, ex.id, ex.name)} label="Archive stretch">
+                              <ArchiveIcon className="w-3.5 h-3.5" />
+                            </IconButton>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Sets: each is a 30s hold -- start the timer or just tap the check to mark it done */}
+                    <div className="px-3.5 pb-3 space-y-1.5">
+                      {ex.sets.map((s, idx) => {
+                        const timerKey = `${activeFlexDay.id}:${ex.id}:${idx}`;
+                        const secondsLeft = activeTimers[timerKey];
+                        const isRunning = typeof secondsLeft === 'number';
+                        return (
+                          <div key={idx} className="flex items-center gap-2">
+                            <span className="w-6 h-6 rounded-full bg-violet-300 text-stone-950 text-[11px] font-black flex items-center justify-center shrink-0">
+                              {idx + 1}
+                            </span>
+                            {s.completed ? (
+                              <button
+                                onClick={() => toggleFlexSetComplete(activeFlexDay.id, ex.id, idx)}
+                                className="flex-1 flex items-center justify-center gap-1.5 bg-emerald-500/10 border border-emerald-500/40 rounded px-3 py-1.5 text-sm text-emerald-300 font-bold"
+                              >
+                                <Check className="w-4 h-4" /> Held {STRETCH_HOLD_SECONDS}s
+                              </button>
+                            ) : isRunning ? (
+                              <div className="flex-1 flex items-center gap-2">
+                                <div className="flex-1 bg-stone-950 border border-violet-400 rounded px-3 py-1.5 text-sm text-violet-300 font-mono tabular-nums text-center">
+                                  {secondsLeft}s…
+                                </div>
+                                <button
+                                  onClick={() => cancelTimer(activeFlexDay.id, ex.id, idx)}
+                                  className="text-stone-600 hover:text-red-500 text-xs shrink-0"
+                                >
+                                  Cancel
+                                </button>
+                              </div>
+                            ) : (
+                              <div className="flex-1 flex items-center gap-2">
+                                <button
+                                  onClick={() => startTimer(activeFlexDay.id, ex.id, idx)}
+                                  className="flex-1 flex items-center justify-center gap-1.5 bg-stone-950 border border-stone-800 rounded px-3 py-1.5 text-sm text-violet-300 hover:border-violet-400 font-bold"
+                                >
+                                  <HistoryIcon className="w-3.5 h-3.5" /> Start {STRETCH_HOLD_SECONDS}s
+                                </button>
+                                <button
+                                  onClick={() => toggleFlexSetComplete(activeFlexDay.id, ex.id, idx)}
+                                  className="text-stone-600 hover:text-emerald-400 shrink-0"
+                                  aria-label="Mark complete without the timer"
+                                  title="Mark complete without the timer"
+                                >
+                                  <Check className="w-4 h-4" />
+                                </button>
+                              </div>
+                            )}
+                            <button
+                              onClick={() => removeFlexSet(activeFlexDay.id, ex.id, idx)}
+                              className="text-stone-700 hover:text-red-500 shrink-0"
+                              aria-label="Remove set"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        );
+                      })}
+                      <button
+                        onClick={() => addFlexSet(activeFlexDay.id, ex.id)}
+                        className="flex items-center gap-1 text-xs text-violet-400 hover:text-violet-300 mt-1 pl-8"
+                      >
+                        <Plus className="w-3 h-3" /> Add set
+                      </button>
+                    </div>
+
+                    {/* Notes panel */}
+                    {openNotes[ex.id] && (
+                      <div className="px-3.5 pb-3 border-t border-stone-800 pt-2.5">
+                        <textarea
+                          value={ex.notes}
+                          onChange={(e) => updateFlexNotes(activeFlexDay.id, ex.id, e.target.value)}
+                          placeholder="Form cues, pain flags, tempo, anything worth remembering…"
+                          rows={2}
+                          className="w-full bg-stone-950 border border-stone-800 rounded px-2.5 py-2 text-sm text-stone-200 placeholder-stone-700 outline-none focus:border-violet-400 resize-none"
+                        />
+                      </div>
+                    )}
+
+                    {/* History panel: just a recent-3 glance -- full history lives in the Library tab's PR view */}
+                    {openHistory[ex.id] && (
+                      <div className="px-3.5 pb-3 border-t border-stone-800 pt-2.5">
+                        {ex.history.length === 0 ? (
+                          <p className="text-xs text-stone-600">No sessions logged yet.</p>
+                        ) : (
+                          <div className="space-y-1">
+                            {ex.history.slice(0, 3).map((h) => (
+                              <div key={h.id} className="flex items-center gap-2 text-xs group">
+                                <span className="text-stone-500 font-mono shrink-0 w-12">{formatDate(h.date)}</span>
+                                <span className="text-stone-300 font-mono tabular-nums flex-1 min-w-0 truncate">
+                                  {summarizeStretchSets(h.sets)}
+                                </span>
+                                <button
+                                  onClick={() => editFlexHistoryEntry(activeFlexDay.id, ex.id, h.id)}
+                                  className="text-stone-600 hover:text-violet-300 shrink-0"
+                                  aria-label={`Edit log from ${formatDate(h.date)}`}
+                                >
+                                  <Pencil className="w-3 h-3" />
+                                </button>
+                                <button
+                                  onClick={() => deleteFlexHistoryEntry(activeFlexDay.id, ex.id, h.id, formatDate(h.date))}
+                                  className="text-stone-600 hover:text-red-500 shrink-0"
+                                  aria-label={`Delete log from ${formatDate(h.date)}`}
+                                >
+                                  <Trash2 className="w-3 h-3" />
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        {ex.history.length > 3 && (
+                          <button
+                            onClick={() => {
+                              setView('flexLibrary');
+                              setFlexPrName(ex.name);
+                            }}
+                            className="text-[11px] text-violet-400 hover:text-violet-400 mt-2"
+                          >
+                            See all {ex.history.length} sessions & PR →
+                          </button>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Footer: log session, which becomes an Edit button right after logging */}
+                    <div className="flex items-center justify-between px-3.5 py-2.5 bg-stone-950 border-t border-stone-800">
+                      <span className="text-[11px] text-stone-600">
+                        {ex.history.length > 0 ? `Last logged ${formatDate(ex.history[0].date)}` : 'Not logged yet'}
+                      </span>
+                      <div className="flex items-center gap-2">
+                        <button onClick={() => clearFlexSets(activeFlexDay.id, ex.id)} className="text-[11px] text-stone-600 hover:text-stone-400">
+                          Clear
+                        </button>
+                        {(() => {
+                          const isEditable = ex.history.length > 0 && stretchSetsEqual(meaningfulStretchSets(ex.sets), ex.history[0].sets);
+                          return (
+                            <button
+                              onClick={() =>
+                                isEditable ? editFlexHistoryEntry(activeFlexDay.id, ex.id, ex.history[0].id) : logFlexSession(activeFlexDay.id, ex.id)
+                              }
+                              className={`flex items-center gap-1 text-xs font-bold px-2.5 py-1.5 rounded ${
+                                isEditable
+                                  ? 'bg-stone-800 text-stone-300 hover:bg-stone-700'
+                                  : 'bg-violet-400 text-stone-950 hover:bg-violet-300'
+                              }`}
+                            >
+                              {isEditable ? (
+                                <>
+                                  <Pencil className="w-3.5 h-3.5" /> Edit
+                                </>
+                              ) : (
+                                'Log session'
+                              )}
+                            </button>
+                          );
+                        })()}
+                      </div>
+                    </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* Complete-day banner: shows once every exercise here is logged, and this day
+                  is part of a multi-day active program -- offers to jump to what's next. */}
+              {activeFlexDay &&
+                data.flexProgram.order.length > 1 &&
+                data.flexProgram.order.includes(activeFlexDay.id) &&
+                dayIsComplete(activeFlexDay, data.flexProgram.loggedIds) &&
+                (() => {
+                  const idx = data.flexProgram.order.indexOf(activeFlexDay.id);
+                  const nextId = data.flexProgram.order[(idx + 1) % data.flexProgram.order.length];
+                  const nextDay = data.flexDays.find((d) => d.id === nextId);
+                  return (
+                    <div className="flex items-center justify-between gap-3 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-4 py-3">
+                      <span className="flex items-center gap-1.5 text-sm font-bold text-emerald-300">
+                        <Check className="w-4 h-4" /> Day complete!
+                      </span>
+                      {nextDay && (
+                        <button
+                          onClick={() => advanceToNextDay(activeFlexDay.id)}
+                          className="flex items-center gap-1 px-3 py-1.5 rounded-md bg-emerald-600 text-stone-950 text-xs font-bold hover:bg-emerald-500 whitespace-nowrap"
+                        >
+                          Next: {nextDay.name} →
+                        </button>
+                      )}
+                    </div>
+                  );
+                })()}
+
+              {/* Add exercise */}
+              {activeFlexDay && (
+                <div>
+                  {addingFlexExerciseFor === activeFlexDay.id ? (
+                    <div className="bg-stone-900 rounded-lg border border-stone-800 px-3 py-2.5">
+                      <ExercisePicker
+                        library={data.flexLibrary}
+                        categories={BODY_AREAS}
+                        colorFn={areaColor}
+                        categoryField="area"
+                        libraryTabLabel="Flex Library"
+                        initialValue=""
+                        placeholder="Search your stretches"
+                        onChoose={(name) => addFlexExercise(activeFlexDay.id, name)}
+                        onCancel={() => setAddingFlexExerciseFor(null)}
+                        onGoToLibrary={() => {
+                          setAddingFlexExerciseFor(null);
+                          setView('flexLibrary');
+                        }}
+                      />
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => setAddingFlexExerciseFor(activeFlexDay.id)}
+                      className="w-full flex items-center justify-center gap-1.5 py-2.5 rounded-lg border border-dashed border-stone-800 text-stone-500 text-sm hover:border-stone-700 hover:text-stone-300"
+                    >
+                      <Plus className="w-4 h-4" /> Add stretch
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          </>
         ) : (
           <>
             {/* Day tabs */}
@@ -1756,6 +2958,21 @@ function ExerciseTracker() {
         />
       )}
 
+      {flexPrName && (
+        <StretchPRModal
+          name={flexPrName}
+          stats={getStretchStats(data.flexDays, flexPrName)}
+          archivedMatches={getArchivedMatches(data.flexDays, flexPrName)}
+          fullHistory={getFullHistory(data.flexDays, flexPrName)}
+          onClose={() => setFlexPrName(null)}
+          onRestore={restoreFlexExercise}
+          onDeleteArchived={(dayId, exId, exName) => {
+            setFlexPrName(null);
+            deleteFlexArchived(dayId, exId, exName);
+          }}
+        />
+      )}
+
       {toast && (
         <div
           className={`fixed bottom-6 left-1/2 -translate-x-1/2 z-50 text-sm font-bold px-4 py-2 rounded-full shadow-lg whitespace-nowrap ${
@@ -1870,21 +3087,123 @@ function PRModal({ name, stats, archivedMatches, fullHistory, onClose, onRestore
 }
 
 // Search-and-select from the library. Selection only — new exercises are added via the Library tab.
+function StretchPRModal({ name, stats, archivedMatches, fullHistory, onClose, onRestore, onDeleteArchived }) {
+  return (
+    <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 px-4" onClick={onClose}>
+      <div
+        className="bg-stone-900 border border-stone-700 rounded-lg p-5 max-w-sm w-full max-h-[85vh] overflow-y-auto"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-start justify-between mb-4">
+          <div className="flex items-center gap-2">
+            <Trophy className="w-4 h-4 text-violet-300" />
+            <h3 className="text-base font-bold text-stone-100">{name}</h3>
+          </div>
+          <button onClick={onClose} className="text-stone-500 hover:text-stone-300" aria-label="Close">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        {stats.sessions === 0 ? (
+          <p className="text-sm text-stone-500">No sessions logged for this stretch yet.</p>
+        ) : (
+          <div className="space-y-3">
+            <div className="bg-stone-950 rounded-md p-3 border border-stone-800">
+              <p className="text-[11px] uppercase tracking-wide text-stone-500 mb-1">Longest session</p>
+              <p className="text-2xl font-black text-violet-300 font-mono tabular-nums">
+                {stats.longestSession} × {STRETCH_HOLD_SECONDS}s
+              </p>
+              <p className="text-[11px] text-stone-600 mt-0.5">holds in a single session</p>
+            </div>
+            <p className="text-[11px] text-stone-600">
+              {stats.sessions} session{stats.sessions > 1 ? 's' : ''} logged · last on {formatDate(stats.lastDate)}
+            </p>
+          </div>
+        )}
+
+        {fullHistory.length > 0 && (
+          <div className="mt-4 pt-4 border-t border-stone-800">
+            <p className="flex items-center gap-1.5 text-[11px] uppercase tracking-wide text-stone-500 mb-2">
+              <HistoryIcon className="w-3 h-3" /> Full history ({fullHistory.length})
+            </p>
+            <div className="space-y-1 max-h-48 overflow-y-auto pr-1">
+              {fullHistory.map((h) => (
+                <div key={h.id} className="flex items-baseline gap-2 text-xs">
+                  <span className="text-stone-500 font-mono shrink-0 w-12">{formatDate(h.date)}</span>
+                  <span className="text-stone-300 font-mono tabular-nums">{summarizeStretchSets(h.sets)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {archivedMatches.length > 0 && (
+          <div className="mt-4 pt-4 border-t border-stone-800">
+            <p className="flex items-center gap-1.5 text-[11px] uppercase tracking-wide text-stone-500 mb-2">
+              <ArchiveIcon className="w-3 h-3" /> Archived ({archivedMatches.length})
+            </p>
+            <div className="space-y-2">
+              {archivedMatches.map(({ dayId, dayName, ex }) => (
+                <div key={ex.id} className="bg-stone-950 rounded-md border border-dashed border-stone-800 px-3 py-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-stone-400">{dayName}</span>
+                    <div className="flex items-center gap-3">
+                      <button
+                        onClick={() => onRestore(dayId, ex.id)}
+                        className="flex items-center gap-1 text-xs text-violet-400 hover:text-violet-300"
+                      >
+                        <Undo2 className="w-3.5 h-3.5" /> Restore
+                      </button>
+                      <button
+                        onClick={() => onDeleteArchived(dayId, ex.id, ex.name)}
+                        className="text-stone-600 hover:text-red-500"
+                        aria-label={`Permanently delete archived ${ex.name} from ${dayName}`}
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                  <p className="text-[11px] text-stone-600 mt-1">
+                    {ex.history.length > 0
+                      ? `${ex.history.length} session${ex.history.length > 1 ? 's' : ''} kept · last ${formatDate(ex.history[0].date)}`
+                      : 'No sessions were logged before this was archived'}
+                  </p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // Two-step picker: choose a muscle group first (colored chips), then search/select within it.
-function ExercisePicker({ library, initialValue = '', onChoose, onCancel, placeholder, onGoToLibrary }) {
-  const [group, setGroup] = useState(null); // null = still choosing a group
+function ExercisePicker({
+  library,
+  initialValue = '',
+  onChoose,
+  onCancel,
+  placeholder,
+  onGoToLibrary,
+  categories = MUSCLE_GROUPS,
+  colorFn = groupColor,
+  categoryField = 'muscleGroup',
+  libraryTabLabel = 'Library',
+}) {
+  const [group, setGroup] = useState(null); // null = still choosing a category
   const [query, setQuery] = useState(initialValue);
 
-  const groupsWithItems = MUSCLE_GROUPS.filter((g) => library.some((l) => (l.muscleGroup || 'Other') === g));
+  const groupsWithItems = categories.filter((g) => library.some((l) => (l[categoryField] || 'Other') === g));
 
-  // Step 1: pick a muscle group to narrow the list
+  // Step 1: pick a category to narrow the list
   if (group === null) {
     return (
       <div>
-        <p className="text-xs text-stone-500 mb-2">Pick a muscle group</p>
+        <p className="text-xs text-stone-500 mb-2">{categoryField === 'area' ? 'Pick a body area' : 'Pick a muscle group'}</p>
         <div className="flex flex-wrap gap-1.5">
           {groupsWithItems.map((g) => {
-            const gc = groupColor(g);
+            const gc = colorFn(g);
             return (
               <button
                 key={g}
@@ -1909,12 +3228,12 @@ function ExercisePicker({ library, initialValue = '', onChoose, onCancel, placeh
     );
   }
 
-  // Step 2: search/select within the chosen group
+  // Step 2: search/select within the chosen category
   const q = query.trim().toLowerCase();
   const filtered = library
-    .filter((l) => group === 'All' || (l.muscleGroup || 'Other') === group)
+    .filter((l) => group === 'All' || (l[categoryField] || 'Other') === group)
     .filter((l) => !q || l.name.toLowerCase().includes(q));
-  const gc = group !== 'All' ? groupColor(group) : null;
+  const gc = group !== 'All' ? colorFn(group) : null;
 
   const choose = (name) => onChoose(name);
 
@@ -1947,13 +3266,13 @@ function ExercisePicker({ library, initialValue = '', onChoose, onCancel, placeh
             <p className="text-xs text-stone-600">No matches{group !== 'All' ? ` in ${group}` : ''}.</p>
             {onGoToLibrary && (
               <button onClick={() => onGoToLibrary(query)} className="text-xs text-cyan-500 hover:text-cyan-400 mt-1">
-                Add "{query.trim() || 'it'}" from the Library tab
+                Add "{query.trim() || 'it'}" from the {libraryTabLabel} tab
               </button>
             )}
           </div>
         ) : (
           filtered.map((l) => {
-            const rowGc = groupColor(l.muscleGroup || 'Other');
+            const rowGc = colorFn(l[categoryField] || 'Other');
             return (
               <button
                 key={l.id}
@@ -1963,7 +3282,7 @@ function ExercisePicker({ library, initialValue = '', onChoose, onCancel, placeh
                 <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${rowGc.dot}`} />
                 <MarqueeText text={l.name} className="flex-1 min-w-0 text-left" />
                 {group === 'All' && (
-                  <span className={`text-[10px] uppercase tracking-wide shrink-0 ${rowGc.text}`}>{l.muscleGroup || 'Other'}</span>
+                  <span className={`text-[10px] uppercase tracking-wide shrink-0 ${rowGc.text}`}>{l[categoryField] || 'Other'}</span>
                 )}
               </button>
             );
@@ -1974,11 +3293,28 @@ function ExercisePicker({ library, initialValue = '', onChoose, onCancel, placeh
   );
 }
 
-function LibraryView({ library, onAdd, onRemove, onSelect, onUpdateGroup, onExport, onImportParsed, onImportError }) {
+function LibraryView({
+  library,
+  onAdd,
+  onRemove,
+  onSelect,
+  onUpdateGroup,
+  onExport,
+  onImportParsed,
+  onImportError,
+  categories = MUSCLE_GROUPS,
+  colorFn = groupColor,
+  categoryField = 'muscleGroup',
+  accent = 'cyan',
+  itemLabel = 'exercise',
+  showBackup = false,
+}) {
   const [newName, setNewName] = useState('');
-  const [newGroup, setNewGroup] = useState(MUSCLE_GROUPS[0]);
+  const [newGroup, setNewGroup] = useState(categories[0]);
   const [search, setSearch] = useState('');
   const fileInputRef = useRef(null);
+  const accentBtn = accent === 'violet' ? 'bg-violet-400 hover:bg-violet-300' : 'bg-cyan-600 hover:bg-cyan-500';
+  const accentFocus = accent === 'violet' ? 'focus:border-violet-400' : 'focus:border-cyan-700';
 
   const submit = () => {
     if (newName.trim()) {
@@ -2010,25 +3346,27 @@ function LibraryView({ library, onAdd, onRemove, onSelect, onUpdateGroup, onExpo
     ? library.filter((l) => l.name.toLowerCase().includes(search.trim().toLowerCase()))
     : library;
 
-  const grouped = MUSCLE_GROUPS.map((group) => ({
-    group,
-    items: searched.filter((l) => (l.muscleGroup || 'Other') === group).sort((a, b) => a.name.localeCompare(b.name)),
-  })).filter((g) => g.items.length > 0);
+  const grouped = categories
+    .map((group) => ({
+      group,
+      items: searched.filter((l) => (l[categoryField] || 'Other') === group).sort((a, b) => a.name.localeCompare(b.name)),
+    }))
+    .filter((g) => g.items.length > 0);
 
   return (
     <div>
-      {/* Search existing exercises */}
+      {/* Search existing items */}
       <div className="relative mb-3">
         <Search className="w-4 h-4 text-stone-600 absolute left-2.5 top-1/2 -translate-y-1/2" />
         <input
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search your library"
-          className="w-full bg-stone-900 border border-stone-800 rounded px-3 py-2 pl-8 text-sm text-stone-100 placeholder-stone-600 outline-none focus:border-cyan-700"
+          placeholder={`Search your ${itemLabel === 'stretch' ? 'stretches' : 'library'}`}
+          className={`w-full bg-stone-900 border border-stone-800 rounded px-3 py-2 pl-8 text-sm text-stone-100 placeholder-stone-600 outline-none ${accentFocus}`}
         />
       </div>
 
-      {/* Add a new exercise */}
+      {/* Add a new item */}
       <div className="flex items-center gap-1.5 mb-4">
         <input
           value={newName}
@@ -2036,101 +3374,105 @@ function LibraryView({ library, onAdd, onRemove, onSelect, onUpdateGroup, onExpo
           onKeyDown={(e) => {
             if (e.key === 'Enter') submit();
           }}
-          placeholder="Add an exercise to your library"
-          className="flex-1 bg-stone-900 border border-stone-800 rounded px-3 py-2 text-sm text-stone-100 placeholder-stone-600 outline-none focus:border-cyan-700"
+          placeholder={`Add a ${itemLabel} to your library`}
+          className={`flex-1 bg-stone-900 border border-stone-800 rounded px-3 py-2 text-sm text-stone-100 placeholder-stone-600 outline-none ${accentFocus}`}
         />
         <select
           value={newGroup}
           onChange={(e) => setNewGroup(e.target.value)}
-          className="bg-stone-900 border border-stone-800 rounded px-2 py-2 text-sm text-stone-300 outline-none focus:border-cyan-700"
+          className={`bg-stone-900 border border-stone-800 rounded px-2 py-2 text-sm text-stone-300 outline-none ${accentFocus}`}
         >
-          {MUSCLE_GROUPS.map((g) => (
+          {categories.map((g) => (
             <option key={g} value={g}>
               {g}
             </option>
           ))}
         </select>
-        <button onClick={submit} className="px-3 py-2 rounded bg-cyan-600 text-stone-950 text-sm font-bold hover:bg-cyan-500">
+        <button onClick={submit} className={`px-3 py-2 rounded text-stone-950 text-sm font-bold ${accentBtn}`}>
           Add
         </button>
       </div>
 
       {grouped.length === 0 ? (
         <p className="text-center text-stone-600 text-sm py-8">
-          {search.trim() ? `No exercises match "${search.trim()}".` : "Your library is empty. Add exercises above so they're ready to pick from in the log."}
+          {search.trim()
+            ? `No ${itemLabel === 'stretch' ? 'stretches' : 'exercises'} match "${search.trim()}".`
+            : `Your library is empty. Add ${itemLabel === 'stretch' ? 'stretches' : 'exercises'} above so they're ready to pick from in the log.`}
         </p>
       ) : (
         <div className="space-y-4">
           {grouped.map(({ group, items }) => {
-            const gc = groupColor(group);
+            const gc = colorFn(group);
             return (
-            <div key={group}>
-              <p className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide text-stone-500 mb-1.5">
-                <span className={`w-2 h-2 rounded-full ${gc.dot}`} />
-                {group} <span className="text-stone-700">({items.length})</span>
-              </p>
-              <div className="space-y-1">
-                {items.map((l) => (
-                  <div
-                    key={l.id}
-                    className={`flex items-center justify-between bg-stone-900 rounded-md px-3 py-2 border border-stone-800 ${gc.left} border-l-4 hover:border-stone-700 cursor-pointer`}
-                    onClick={() => onSelect(l.name)}
-                  >
-                    <span className="flex items-center gap-2 text-sm text-stone-200 min-w-0">
-                      <Trophy className="w-3.5 h-3.5 text-stone-600 shrink-0" />
-                      <MarqueeText text={l.name} className="min-w-0" />
-                    </span>
-                    <div className="flex items-center gap-2 shrink-0" onClick={(e) => e.stopPropagation()}>
-                      <select
-                        value={l.muscleGroup || 'Other'}
-                        onChange={(e) => onUpdateGroup(l.id, e.target.value)}
-                        aria-label={`Muscle group for ${l.name}`}
-                        className="bg-stone-950 border border-stone-800 rounded px-1.5 py-1 text-xs text-stone-400 outline-none focus:border-cyan-700"
-                      >
-                        {MUSCLE_GROUPS.map((g) => (
-                          <option key={g} value={g}>
-                            {g}
-                          </option>
-                        ))}
-                      </select>
-                      <button onClick={() => onRemove(l.id)} className="text-stone-600 hover:text-red-500" aria-label={`Remove ${l.name} from library`}>
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
+              <div key={group}>
+                <p className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide text-stone-500 mb-1.5">
+                  <span className={`w-2 h-2 rounded-full ${gc.dot}`} />
+                  {group} <span className="text-stone-700">({items.length})</span>
+                </p>
+                <div className="space-y-1">
+                  {items.map((l) => (
+                    <div
+                      key={l.id}
+                      className={`flex items-center justify-between bg-stone-900 rounded-md px-3 py-2 border border-stone-800 ${gc.left} border-l-4 hover:border-stone-700 cursor-pointer`}
+                      onClick={() => onSelect(l.name)}
+                    >
+                      <span className="flex items-center gap-2 text-sm text-stone-200 min-w-0">
+                        <Trophy className="w-3.5 h-3.5 text-stone-600 shrink-0" />
+                        <MarqueeText text={l.name} className="min-w-0" />
+                      </span>
+                      <div className="flex items-center gap-2 shrink-0" onClick={(e) => e.stopPropagation()}>
+                        <select
+                          value={l[categoryField] || 'Other'}
+                          onChange={(e) => onUpdateGroup(l.id, e.target.value)}
+                          aria-label={`Category for ${l.name}`}
+                          className={`bg-stone-950 border border-stone-800 rounded px-1.5 py-1 text-xs text-stone-400 outline-none ${accentFocus}`}
+                        >
+                          {categories.map((g) => (
+                            <option key={g} value={g}>
+                              {g}
+                            </option>
+                          ))}
+                        </select>
+                        <button onClick={() => onRemove(l.id, l.name)} className="text-stone-600 hover:text-red-500" aria-label={`Remove ${l.name} from library`}>
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  ))}
+                </div>
               </div>
-            </div>
             );
           })}
         </div>
       )}
       <p className="text-[11px] text-stone-600 mt-4">
-        Tap an exercise to see your PR. Removing one here only removes it from the picker — any logs already recorded under that name stay untouched.
+        Tap {itemLabel === 'stretch' ? 'a stretch' : 'an exercise'} to see your PR. Removing one here only removes it from the picker — any logs already recorded under that name stay untouched.
       </p>
 
-      {/* Backup / restore everything: sessions, program, and library */}
-      <div className="mt-6 pt-4 border-t border-stone-800">
-        <p className="text-[11px] font-bold uppercase tracking-wide text-stone-500 mb-2">Backup</p>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={onExport}
-            className="flex items-center gap-1.5 flex-1 justify-center px-3 py-2 rounded-md border border-stone-800 text-sm text-stone-300 hover:border-stone-700 hover:text-stone-100"
-          >
-            <Download className="w-3.5 h-3.5" /> Save my data
-          </button>
-          <button
-            onClick={handleImportClick}
-            className="flex items-center gap-1.5 flex-1 justify-center px-3 py-2 rounded-md border border-stone-800 text-sm text-stone-300 hover:border-stone-700 hover:text-stone-100"
-          >
-            <Upload className="w-3.5 h-3.5" /> Restore
-          </button>
-          <input ref={fileInputRef} type="file" accept="application/json" onChange={handleFileChosen} className="hidden" />
+      {/* Backup / restore everything: covers both strength and flexibility data at once */}
+      {showBackup && (
+        <div className="mt-6 pt-4 border-t border-stone-800">
+          <p className="text-[11px] font-bold uppercase tracking-wide text-stone-500 mb-2">Backup</p>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={onExport}
+              className="flex items-center gap-1.5 flex-1 justify-center px-3 py-2 rounded-md border border-stone-800 text-sm text-stone-300 hover:border-stone-700 hover:text-stone-100"
+            >
+              <Download className="w-3.5 h-3.5" /> Save my data
+            </button>
+            <button
+              onClick={handleImportClick}
+              className="flex items-center gap-1.5 flex-1 justify-center px-3 py-2 rounded-md border border-stone-800 text-sm text-stone-300 hover:border-stone-700 hover:text-stone-100"
+            >
+              <Upload className="w-3.5 h-3.5" /> Restore
+            </button>
+            <input ref={fileInputRef} type="file" accept="application/json" onChange={handleFileChosen} className="hidden" />
+          </div>
+          <p className="text-[11px] text-stone-600 mt-2">
+            Downloads everything — strength and flexibility sessions, libraries, and programs — as a file you can keep safe or move to another device.
+          </p>
         </div>
-        <p className="text-[11px] text-stone-600 mt-2">
-          Downloads everything — sessions, library, and program — as a file you can keep safe or move to another device.
-        </p>
-      </div>
+      )}
     </div>
   );
 }
