@@ -695,17 +695,20 @@ function getArchivedMatches(days, name) {
 }
 
 // Every logged session for this name, across every day slot and archived slot, newest first.
-// This is the "full" history -- the Log view only ever shows a recent-3 glance.
+// This is the shared timeline for an exercise name -- the same "Lateral Raise" logged on two
+// different days shows up as one merged history, wherever you view it from. Each entry is
+// tagged with which exercise instance actually owns it (ownerDayId/ownerExId), so it can still
+// be edited or deleted correctly regardless of which day's card you're looking at it from.
 function getFullHistory(days, name) {
   const lower = name.toLowerCase();
   const entries = [];
-  const consider = (ex) => {
+  const consider = (dayId, ex) => {
     if (ex.name.toLowerCase() !== lower) return;
-    ex.history.forEach((h) => entries.push(h));
+    ex.history.forEach((h) => entries.push({ ...h, ownerDayId: dayId, ownerExId: ex.id }));
   };
   days.forEach((d) => {
-    d.exercises.forEach(consider);
-    (d.archived || []).forEach(consider);
+    d.exercises.forEach((ex) => consider(d.id, ex));
+    (d.archived || []).forEach((ex) => consider(d.id, ex));
   });
   return entries.sort((a, b) => new Date(b.date) - new Date(a.date));
 }
@@ -724,6 +727,15 @@ function ExerciseTracker() {
   const [addingDay, setAddingDay] = useState(false);
   const [newDayName, setNewDayName] = useState('');
   const [confirm, setConfirm] = useState(null); // { message, onConfirm } — replaces window.confirm, which sandboxed artifacts can silently block
+  // Tracks which exact exercise instance (`${dayId}:${exId}`) was just logged, so the footer
+  // button can show "Edit" right after -- purely based on the action taken, not by comparing
+  // field values (which could coincidentally match an old log, e.g. typing reps=1 when that's
+  // also what you logged last time, and falsely flip to Edit mode before you've pressed anything).
+  const [justLoggedKey, setJustLoggedKey] = useState(null);
+  const clearJustLogged = (dayId, exId) => {
+    const key = `${dayId}:${exId}`;
+    setJustLoggedKey((k) => (k === key ? null : k));
+  };
   const [prName, setPrName] = useState(null); // exercise name currently shown in the PR modal
   const [draggingExerciseId, setDraggingExerciseId] = useState(null);
   const [draggingDayId, setDraggingDayId] = useState(null);
@@ -859,6 +871,7 @@ function ExerciseTracker() {
             delete next[key];
             const [dayId, exId, idxStr] = key.split(':');
             const idx = Number(idxStr);
+            clearJustLogged(dayId, exId);
             setData((prevData) => ({
               ...prevData,
               flexDays: prevData.flexDays.map((d) =>
@@ -956,6 +969,7 @@ function ExerciseTracker() {
   // Manual tap-to-complete/uncomplete -- the alternative to running the timer to completion.
   const toggleFlexSetComplete = (dayId, exId, idx) => {
     cancelTimer(dayId, exId, idx);
+    clearJustLogged(dayId, exId);
     updateFlexExercise(dayId, exId, (ex) => ({
       ...ex,
       sets: ex.sets.map((s, i) => (i === idx ? { ...s, completed: !s.completed } : s)),
@@ -1268,10 +1282,12 @@ function ExerciseTracker() {
   };
 
   const addSet = (dayId, exId) => {
+    clearJustLogged(dayId, exId);
     updateExercise(dayId, exId, (ex) => ({ ...ex, sets: [...ex.sets, { weight: '', reps: '' }] }));
   };
 
   const removeSet = (dayId, exId, idx) => {
+    clearJustLogged(dayId, exId);
     updateExercise(dayId, exId, (ex) => {
       if (ex.sets.length <= 1) return { ...ex, sets: [{ weight: '', reps: '' }] };
       return { ...ex, sets: ex.sets.filter((_, i) => i !== idx) };
@@ -1279,6 +1295,7 @@ function ExerciseTracker() {
   };
 
   const updateSetField = (dayId, exId, idx, field, value) => {
+    clearJustLogged(dayId, exId);
     updateExercise(dayId, exId, (ex) => ({
       ...ex,
       sets: ex.sets.map((s, i) => (i === idx ? { ...s, [field]: value } : s)),
@@ -1307,33 +1324,66 @@ function ExerciseTracker() {
         return d && dayIsComplete(d, loggedIds);
       });
 
-    setData((prev) => ({
-      ...prev,
-      days: prev.days.map((d) =>
+    setData((prev) => {
+      let days = prev.days.map((d) =>
         d.id === dayId ? { ...d, exercises: d.exercises.map((e) => (e.id === exId ? updatedEx : e)) } : d
-      ),
-      program: { ...prev.program, loggedIds: cycleComplete ? [] : loggedIds },
-    }));
+      );
+      if (cycleComplete) {
+        // Blank every exercise's input fields across the whole program for the new round --
+        // history stays put (that's what feeds the "last time" hint), only the live fields reset.
+        days = days.map((d) =>
+          prev.program.order.includes(d.id)
+            ? { ...d, exercises: d.exercises.map((e) => ({ ...e, sets: [{ weight: '', reps: '' }] })) }
+            : d
+        );
+      }
+      return {
+        ...prev,
+        days,
+        program: { ...prev.program, loggedIds: cycleComplete ? [] : loggedIds },
+      };
+    });
 
     if (cycleComplete) {
+      setJustLoggedKey(null); // this exercise's fields just got blanked for the new round too
       showToast('Program cycle complete — reset for the next round');
+    } else {
+      setJustLoggedKey(`${dayId}:${exId}`);
     }
   };
 
   // Pulls a logged entry back into the editable set fields, so a mis-typed log can be
   // corrected instead of living in history forever. Works for any entry, not just the most
   // recent -- editing re-saves with today's date when you press "Log session" again, it
-  // doesn't preserve the original entry's date.
-  const editHistoryEntry = (dayId, exId, entryId) => {
-    updateExercise(dayId, exId, (ex) => {
-      const entry = ex.history.find((h) => h.id === entryId);
-      if (!entry) return ex;
-      return {
-        ...ex,
-        sets: entry.sets.length ? entry.sets.map((s) => ({ weight: s.weight, reps: s.reps })) : [{ weight: '', reps: '' }],
-        history: ex.history.filter((h) => h.id !== entryId),
-      };
-    });
+  // doesn't preserve the original entry's date. Since history is shared across every day
+  // that has an exercise with this same name, the entry being edited might actually live on
+  // a *different* day than the one you're viewing -- targetDayId/targetExId is the card
+  // you're looking at (where the values land); ownerDayId/ownerExId is wherever the entry
+  // itself is actually stored (where it gets removed from).
+  const editHistoryEntry = (targetDayId, targetExId, ownerDayId, ownerExId, entryId) => {
+    const ownerDay = data.days.find((d) => d.id === ownerDayId);
+    const ownerEx = ownerDay?.exercises.find((e) => e.id === ownerExId);
+    const entry = ownerEx?.history.find((h) => h.id === entryId);
+    if (!entry) return;
+    const newSets = entry.sets.length ? entry.sets.map((s) => ({ weight: s.weight, reps: s.reps })) : [{ weight: '', reps: '' }];
+    clearJustLogged(targetDayId, targetExId);
+
+    setData((prev) => ({
+      ...prev,
+      days: prev.days.map((d) => {
+        let day = d;
+        if (day.id === ownerDayId) {
+          day = {
+            ...day,
+            exercises: day.exercises.map((e) => (e.id === ownerExId ? { ...e, history: e.history.filter((h) => h.id !== entryId) } : e)),
+          };
+        }
+        if (day.id === targetDayId) {
+          day = { ...day, exercises: day.exercises.map((e) => (e.id === targetExId ? { ...e, sets: newSets } : e)) };
+        }
+        return day;
+      }),
+    }));
   };
 
   const deleteHistoryEntry = (dayId, exId, entryId, dateLabel) => {
@@ -1343,6 +1393,7 @@ function ExerciseTracker() {
   };
 
   const clearSets = (dayId, exId) => {
+    clearJustLogged(dayId, exId);
     updateExercise(dayId, exId, (ex) => ({ ...ex, sets: [{ weight: '', reps: '' }] }));
   };
 
@@ -1693,11 +1744,13 @@ function ExerciseTracker() {
   };
 
   const addFlexSet = (dayId, exId) => {
+    clearJustLogged(dayId, exId);
     updateFlexExercise(dayId, exId, (ex) => ({ ...ex, sets: [...ex.sets, { completed: false }] }));
   };
 
   const removeFlexSet = (dayId, exId, idx) => {
     cancelTimer(dayId, exId, idx);
+    clearJustLogged(dayId, exId);
     updateFlexExercise(dayId, exId, (ex) => {
       if (ex.sets.length <= 1) return { ...ex, sets: [{ completed: false }] };
       return { ...ex, sets: ex.sets.filter((_, i) => i !== idx) };
@@ -1705,6 +1758,7 @@ function ExerciseTracker() {
   };
 
   const clearFlexSets = (dayId, exId) => {
+    clearJustLogged(dayId, exId);
     updateFlexExercise(dayId, exId, (ex) => ({ ...ex, sets: [{ completed: false }] }));
   };
 
@@ -1736,29 +1790,56 @@ function ExerciseTracker() {
         return d && dayIsComplete(d, loggedIds);
       });
 
-    setData((prev) => ({
-      ...prev,
-      flexDays: prev.flexDays.map((d) =>
+    setData((prev) => {
+      let flexDays = prev.flexDays.map((d) =>
         d.id === dayId ? { ...d, exercises: d.exercises.map((e) => (e.id === exId ? updatedEx : e)) } : d
-      ),
-      flexProgram: { ...prev.flexProgram, loggedIds: cycleComplete ? [] : loggedIds },
-    }));
+      );
+      if (cycleComplete) {
+        flexDays = flexDays.map((d) =>
+          prev.flexProgram.order.includes(d.id)
+            ? { ...d, exercises: d.exercises.map((e) => ({ ...e, sets: [{ completed: false }] })) }
+            : d
+        );
+      }
+      return {
+        ...prev,
+        flexDays,
+        flexProgram: { ...prev.flexProgram, loggedIds: cycleComplete ? [] : loggedIds },
+      };
+    });
 
     if (cycleComplete) {
+      setJustLoggedKey(null);
       showToast('Flexibility cycle complete — reset for the next round');
+    } else {
+      setJustLoggedKey(`${dayId}:${exId}`);
     }
   };
 
-  const editFlexHistoryEntry = (dayId, exId, entryId) => {
-    updateFlexExercise(dayId, exId, (ex) => {
-      const entry = ex.history.find((h) => h.id === entryId);
-      if (!entry) return ex;
-      return {
-        ...ex,
-        sets: entry.sets.length ? entry.sets.map((s) => ({ completed: s.completed })) : [{ completed: false }],
-        history: ex.history.filter((h) => h.id !== entryId),
-      };
-    });
+  const editFlexHistoryEntry = (targetDayId, targetExId, ownerDayId, ownerExId, entryId) => {
+    const ownerDay = data.flexDays.find((d) => d.id === ownerDayId);
+    const ownerEx = ownerDay?.exercises.find((e) => e.id === ownerExId);
+    const entry = ownerEx?.history.find((h) => h.id === entryId);
+    if (!entry) return;
+    const newSets = entry.sets.length ? entry.sets.map((s) => ({ completed: s.completed })) : [{ completed: false }];
+    clearJustLogged(targetDayId, targetExId);
+
+    setData((prev) => ({
+      ...prev,
+      flexDays: prev.flexDays.map((d) => {
+        let day = d;
+        if (day.id === ownerDayId) {
+          day = {
+            ...day,
+            exercises: day.exercises.map((e) => (e.id === ownerExId ? { ...e, history: e.history.filter((h) => h.id !== entryId) } : e)),
+          };
+        }
+        if (day.id === targetDayId) {
+          day = { ...day, exercises: day.exercises.map((e) => (e.id === targetExId ? { ...e, sets: newSets } : e)) };
+        }
+        return day;
+      }),
+    }));
   };
 
   const deleteFlexHistoryEntry = (dayId, exId, entryId, dateLabel) => {
@@ -2137,6 +2218,7 @@ function ExerciseTracker() {
                 <div ref={flexExerciseListRef} className="space-y-3">
                   {activeFlexDay.exercises.map((ex) => {
                     const gc = areaColor(areaForName(ex.name));
+                    const mergedHistory = getFullHistory(data.flexDays, ex.name); // shared across every day with this same stretch name
                     return (
                       <div
                         key={ex.id}
@@ -2293,38 +2375,45 @@ function ExerciseTracker() {
                       </div>
                     )}
 
-                    {/* History panel: just a recent-3 glance -- full history lives in the Library tab's PR view */}
-                    {openHistory[ex.id] && (
+                    {/* History panel: just a recent-3 glance -- full history lives in the Library tab's PR view.
+                        Shared across every flex day that has a stretch with this same name. */}
+                    {openHistory[ex.id] && (() => {
+                      return (
                       <div className="px-3.5 pb-3 border-t border-stone-800 pt-2.5">
-                        {ex.history.length === 0 ? (
+                        {mergedHistory.length === 0 ? (
                           <p className="text-xs text-stone-600">No sessions logged yet.</p>
                         ) : (
                           <div className="space-y-1">
-                            {ex.history.slice(0, 3).map((h) => (
+                            {mergedHistory.slice(0, 3).map((h) => {
+                              const fromOtherDay = h.ownerDayId !== activeFlexDay.id;
+                              const ownerDayName = fromOtherDay ? data.flexDays.find((d) => d.id === h.ownerDayId)?.name : null;
+                              return (
                               <div key={h.id} className="flex items-center gap-2 text-xs group">
                                 <span className="text-stone-500 font-mono shrink-0 w-12">{formatDate(h.date)}</span>
                                 <span className="text-stone-300 font-mono tabular-nums flex-1 min-w-0 truncate">
                                   {summarizeStretchSets(h.sets)}
+                                  {ownerDayName && <span className="text-stone-600"> · {ownerDayName}</span>}
                                 </span>
                                 <button
-                                  onClick={() => editFlexHistoryEntry(activeFlexDay.id, ex.id, h.id)}
+                                  onClick={() => editFlexHistoryEntry(activeFlexDay.id, ex.id, h.ownerDayId, h.ownerExId, h.id)}
                                   className="text-stone-600 hover:text-violet-300 shrink-0"
                                   aria-label={`Edit log from ${formatDate(h.date)}`}
                                 >
                                   <Pencil className="w-3 h-3" />
                                 </button>
                                 <button
-                                  onClick={() => deleteFlexHistoryEntry(activeFlexDay.id, ex.id, h.id, formatDate(h.date))}
+                                  onClick={() => deleteFlexHistoryEntry(h.ownerDayId, h.ownerExId, h.id, formatDate(h.date))}
                                   className="text-stone-600 hover:text-red-500 shrink-0"
                                   aria-label={`Delete log from ${formatDate(h.date)}`}
                                 >
                                   <Trash2 className="w-3 h-3" />
                                 </button>
                               </div>
-                            ))}
+                              );
+                            })}
                           </div>
                         )}
-                        {ex.history.length > 3 && (
+                        {mergedHistory.length > 3 && (
                           <button
                             onClick={() => {
                               setView('flexLibrary');
@@ -2332,27 +2421,30 @@ function ExerciseTracker() {
                             }}
                             className="text-[11px] text-violet-400 hover:text-violet-400 mt-2"
                           >
-                            See all {ex.history.length} sessions & PR →
+                            See all {mergedHistory.length} sessions & PR →
                           </button>
                         )}
                       </div>
-                    )}
+                    );
+                    })()}
 
                     {/* Footer: log session, which becomes an Edit button right after logging */}
                     <div className="flex items-center justify-between px-3.5 py-2.5 bg-stone-950 border-t border-stone-800">
                       <span className="text-[11px] text-stone-600">
-                        {ex.history.length > 0 ? `Last logged ${formatDate(ex.history[0].date)}` : 'Not logged yet'}
+                        {mergedHistory.length > 0 ? `Last logged ${formatDate(mergedHistory[0].date)}` : 'Not logged yet'}
                       </span>
                       <div className="flex items-center gap-2">
                         <button onClick={() => clearFlexSets(activeFlexDay.id, ex.id)} className="text-[11px] text-stone-600 hover:text-stone-400">
                           Clear
                         </button>
                         {(() => {
-                          const isEditable = ex.history.length > 0 && stretchSetsEqual(meaningfulStretchSets(ex.sets), ex.history[0].sets);
+                          const isEditable = justLoggedKey === `${activeFlexDay.id}:${ex.id}`;
                           return (
                             <button
                               onClick={() =>
-                                isEditable ? editFlexHistoryEntry(activeFlexDay.id, ex.id, ex.history[0].id) : logFlexSession(activeFlexDay.id, ex.id)
+                                isEditable
+                                  ? editFlexHistoryEntry(activeFlexDay.id, ex.id, activeFlexDay.id, ex.id, ex.history[0]?.id)
+                                  : logFlexSession(activeFlexDay.id, ex.id)
                               }
                               className={`flex items-center gap-1 text-xs font-bold px-2.5 py-1.5 rounded ${
                                 isEditable
@@ -2634,6 +2726,7 @@ function ExerciseTracker() {
                 <div ref={exerciseListRef} className="space-y-3">
                   {activeDay.exercises.map((ex) => {
                     const gc = groupColor(groupForName(ex.name));
+                    const mergedHistory = getFullHistory(data.days, ex.name); // shared across every day with this same exercise name
                     return (
                       <div
                         key={ex.id}
@@ -2710,7 +2803,7 @@ function ExerciseTracker() {
                     {/* Sets */}
                     <div className="px-3.5 pb-3 space-y-1.5">
                       {ex.sets.map((s, idx) => {
-                        const prevSet = ex.history[0]?.sets[idx];
+                        const prevSet = mergedHistory[0]?.sets[idx];
                         return (
                         <div key={idx} className="flex items-center gap-2">
                           <span className="w-6 h-6 rounded-full bg-amber-500 text-stone-950 text-[11px] font-black flex items-center justify-center shrink-0">
@@ -2764,38 +2857,44 @@ function ExerciseTracker() {
                       </div>
                     )}
 
-                    {/* History panel: just a recent-3 glance -- full history lives in the Library tab's PR view */}
+                    {/* History panel: just a recent-3 glance -- full history lives in the Library tab's PR view.
+                        Shared across every day that has an exercise with this same name. */}
                     {openHistory[ex.id] && (
                       <div className="px-3.5 pb-3 border-t border-stone-800 pt-2.5">
-                        {ex.history.length === 0 ? (
+                        {mergedHistory.length === 0 ? (
                           <p className="text-xs text-stone-600">No sessions logged yet.</p>
                         ) : (
                           <div className="space-y-1">
-                            {ex.history.slice(0, 3).map((h) => (
+                            {mergedHistory.slice(0, 3).map((h) => {
+                              const fromOtherDay = h.ownerDayId !== activeDay.id;
+                              const ownerDayName = fromOtherDay ? data.days.find((d) => d.id === h.ownerDayId)?.name : null;
+                              return (
                               <div key={h.id} className="flex items-center gap-2 text-xs group">
                                 <span className="text-stone-500 font-mono shrink-0 w-12">{formatDate(h.date)}</span>
                                 <span className="text-stone-300 font-mono tabular-nums flex-1 min-w-0 truncate">
                                   {summarizeSets(h.sets)}
+                                  {ownerDayName && <span className="text-stone-600"> · {ownerDayName}</span>}
                                 </span>
                                 <button
-                                  onClick={() => editHistoryEntry(activeDay.id, ex.id, h.id)}
+                                  onClick={() => editHistoryEntry(activeDay.id, ex.id, h.ownerDayId, h.ownerExId, h.id)}
                                   className="text-stone-600 hover:text-cyan-500 shrink-0"
                                   aria-label={`Edit log from ${formatDate(h.date)}`}
                                 >
                                   <Pencil className="w-3 h-3" />
                                 </button>
                                 <button
-                                  onClick={() => deleteHistoryEntry(activeDay.id, ex.id, h.id, formatDate(h.date))}
+                                  onClick={() => deleteHistoryEntry(h.ownerDayId, h.ownerExId, h.id, formatDate(h.date))}
                                   className="text-stone-600 hover:text-red-500 shrink-0"
                                   aria-label={`Delete log from ${formatDate(h.date)}`}
                                 >
                                   <Trash2 className="w-3 h-3" />
                                 </button>
                               </div>
-                            ))}
+                              );
+                            })}
                           </div>
                         )}
-                        {ex.history.length > 3 && (
+                        {mergedHistory.length > 3 && (
                           <button
                             onClick={() => {
                               setView('library');
@@ -2803,7 +2902,7 @@ function ExerciseTracker() {
                             }}
                             className="text-[11px] text-cyan-600 hover:text-cyan-400 mt-2"
                           >
-                            See all {ex.history.length} sessions & PR →
+                            See all {mergedHistory.length} sessions & PR →
                           </button>
                         )}
                       </div>
@@ -2812,18 +2911,20 @@ function ExerciseTracker() {
                     {/* Footer: log session, which becomes an Edit button right after logging */}
                     <div className="flex items-center justify-between px-3.5 py-2.5 bg-stone-950 border-t border-stone-800">
                       <span className="text-[11px] text-stone-600">
-                        {ex.history.length > 0 ? `Last logged ${formatDate(ex.history[0].date)}` : 'Not logged yet'}
+                        {mergedHistory.length > 0 ? `Last logged ${formatDate(mergedHistory[0].date)}` : 'Not logged yet'}
                       </span>
                       <div className="flex items-center gap-2">
                         <button onClick={() => clearSets(activeDay.id, ex.id)} className="text-[11px] text-stone-600 hover:text-stone-400">
                           Clear
                         </button>
                         {(() => {
-                          const isEditable = ex.history.length > 0 && setsEqual(meaningfulSets(ex.sets), ex.history[0].sets);
+                          const isEditable = justLoggedKey === `${activeDay.id}:${ex.id}`;
                           return (
                             <button
                               onClick={() =>
-                                isEditable ? editHistoryEntry(activeDay.id, ex.id, ex.history[0].id) : logSession(activeDay.id, ex.id)
+                                isEditable
+                                  ? editHistoryEntry(activeDay.id, ex.id, activeDay.id, ex.id, ex.history[0]?.id)
+                                  : logSession(activeDay.id, ex.id)
                               }
                               className={`flex items-center gap-1 text-xs font-bold px-2.5 py-1.5 rounded ${
                                 isEditable
