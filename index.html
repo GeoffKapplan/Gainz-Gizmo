@@ -730,14 +730,29 @@ function ExerciseTracker() {
   const [addingDay, setAddingDay] = useState(false);
   const [newDayName, setNewDayName] = useState('');
   const [confirm, setConfirm] = useState(null); // { message, onConfirm } — replaces window.confirm, which sandboxed artifacts can silently block
-  // Tracks which exact exercise instance (`${dayId}:${exId}`) was just logged, so the footer
-  // button can show "Edit" right after -- purely based on the action taken, not by comparing
-  // field values (which could coincidentally match an old log, e.g. typing reps=1 when that's
-  // also what you logged last time, and falsely flip to Edit mode before you've pressed anything).
-  const [justLoggedKey, setJustLoggedKey] = useState(null);
+  // Tracks every exercise instance (`${dayId}:${exId}`) that was just logged and hasn't been
+  // touched since, so each one's footer button can independently show "Edit" -- purely based
+  // on the action taken, not by comparing field values (which could coincidentally match an
+  // old log, e.g. typing reps=1 when that's also what you logged last time). A Set (not a
+  // single value) so logging exercise B doesn't clear exercise A's still-valid "just logged"
+  // state.
+  const [justLoggedKeys, setJustLoggedKeys] = useState(() => new Set());
+  const markJustLogged = (dayId, exId) => {
+    const key = `${dayId}:${exId}`;
+    setJustLoggedKeys((prev) => {
+      const next = new Set(prev);
+      next.add(key);
+      return next;
+    });
+  };
   const clearJustLogged = (dayId, exId) => {
     const key = `${dayId}:${exId}`;
-    setJustLoggedKey((k) => (k === key ? null : k));
+    setJustLoggedKeys((prev) => {
+      if (!prev.has(key)) return prev;
+      const next = new Set(prev);
+      next.delete(key);
+      return next;
+    });
   };
   const [prName, setPrName] = useState(null); // exercise name currently shown in the PR modal
   const [draggingExerciseId, setDraggingExerciseId] = useState(null);
@@ -861,16 +876,28 @@ function ExerciseTracker() {
     };
   }, []);
 
-  // Ticks every active stretch timer down once a second; when one hits zero it auto-marks
-  // that set complete and clears itself out. Timers are purely ephemeral UI state -- they
-  // don't survive a reload, same as any in-progress (unsaved) rest timer wouldn't.
+  const PRE_COUNTDOWN_SECONDS = 3;
+
+  // Ticks every active stretch timer down once a second. Each timer has two phases: a brief
+  // "get ready" countdown, then the actual hold -- when the hold phase hits zero, it
+  // auto-marks that set complete and clears itself out. Timers are purely ephemeral UI state
+  // -- they don't survive a reload, same as any in-progress (unsaved) rest timer wouldn't.
   useEffect(() => {
     if (Object.keys(activeTimers).length === 0) return;
     const interval = setInterval(() => {
       setActiveTimers((prev) => {
         const next = { ...prev };
-        Object.entries(prev).forEach(([key, secondsLeft]) => {
-          if (secondsLeft <= 1) {
+        Object.entries(prev).forEach(([key, timer]) => {
+          if (timer.phase === 'countdown') {
+            if (timer.secondsLeft <= 1) {
+              next[key] = { phase: 'hold', secondsLeft: STRETCH_HOLD_SECONDS };
+            } else {
+              next[key] = { ...timer, secondsLeft: timer.secondsLeft - 1 };
+            }
+            return;
+          }
+          // phase === 'hold'
+          if (timer.secondsLeft <= 1) {
             delete next[key];
             const [dayId, exId, idxStr] = key.split(':');
             const idx = Number(idxStr);
@@ -891,7 +918,7 @@ function ExerciseTracker() {
               ),
             }));
           } else {
-            next[key] = secondsLeft - 1;
+            next[key] = { ...timer, secondsLeft: timer.secondsLeft - 1 };
           }
         });
         return next;
@@ -947,9 +974,13 @@ function ExerciseTracker() {
     return match?.area || 'Other';
   };
 
-  // Begins a 30s countdown for one specific set; it auto-completes via the ticking effect above.
+  // Begins a brief "get ready" countdown for one specific set; once that reaches zero the
+  // ticking effect above switches it into the actual 30s hold, then auto-completes it.
   const startTimer = (dayId, exId, idx) => {
-    setActiveTimers((prev) => ({ ...prev, [`${dayId}:${exId}:${idx}`]: STRETCH_HOLD_SECONDS }));
+    setActiveTimers((prev) => ({
+      ...prev,
+      [`${dayId}:${exId}:${idx}`]: { phase: 'countdown', secondsLeft: PRE_COUNTDOWN_SECONDS },
+    }));
   };
 
   const cancelTimer = (dayId, exId, idx) => {
@@ -1333,10 +1364,11 @@ function ExerciseTracker() {
       );
       if (cycleComplete) {
         // Blank every exercise's input fields across the whole program for the new round --
-        // history stays put (that's what feeds the "last time" hint), only the live fields reset.
+        // history stays put (that's what feeds the "last time" hint), only the live fields
+        // reset. Keep however many set rows each exercise already had; only clear their values.
         days = days.map((d) =>
           prev.program.order.includes(d.id)
-            ? { ...d, exercises: d.exercises.map((e) => ({ ...e, sets: [{ weight: '', reps: '' }] })) }
+            ? { ...d, exercises: d.exercises.map((e) => ({ ...e, sets: e.sets.map(() => ({ weight: '', reps: '' })) })) }
             : d
         );
       }
@@ -1348,10 +1380,10 @@ function ExerciseTracker() {
     });
 
     if (cycleComplete) {
-      setJustLoggedKey(null); // this exercise's fields just got blanked for the new round too
+      setJustLoggedKeys(new Set()); // every exercise's fields just got blanked for the new round too
       showToast('Program cycle complete — reset for the next round');
     } else {
-      setJustLoggedKey(`${dayId}:${exId}`);
+      markJustLogged(dayId, exId);
     }
   };
 
@@ -1800,7 +1832,7 @@ function ExerciseTracker() {
       if (cycleComplete) {
         flexDays = flexDays.map((d) =>
           prev.flexProgram.order.includes(d.id)
-            ? { ...d, exercises: d.exercises.map((e) => ({ ...e, sets: [{ completed: false }] })) }
+            ? { ...d, exercises: d.exercises.map((e) => ({ ...e, sets: e.sets.map(() => ({ completed: false })) })) }
             : d
         );
       }
@@ -1812,10 +1844,10 @@ function ExerciseTracker() {
     });
 
     if (cycleComplete) {
-      setJustLoggedKey(null);
+      setJustLoggedKeys(new Set());
       showToast('Flexibility cycle complete — reset for the next round');
     } else {
-      setJustLoggedKey(`${dayId}:${exId}`);
+      markJustLogged(dayId, exId);
     }
   };
 
@@ -2303,8 +2335,8 @@ function ExerciseTracker() {
                     <div className="px-3.5 pb-3 space-y-1.5">
                       {ex.sets.map((s, idx) => {
                         const timerKey = `${activeFlexDay.id}:${ex.id}:${idx}`;
-                        const secondsLeft = activeTimers[timerKey];
-                        const isRunning = typeof secondsLeft === 'number';
+                        const timerState = activeTimers[timerKey];
+                        const isRunning = !!timerState;
                         return (
                           <div key={idx} className="flex items-center gap-2">
                             <span className="w-6 h-6 rounded-full bg-violet-300 text-stone-950 text-[11px] font-black flex items-center justify-center shrink-0">
@@ -2320,7 +2352,7 @@ function ExerciseTracker() {
                             ) : isRunning ? (
                               <div className="flex-1 flex items-center gap-2">
                                 <div className="flex-1 bg-stone-950 border border-violet-400 rounded px-3 py-1.5 text-sm text-violet-300 font-mono tabular-nums text-center">
-                                  {secondsLeft}s…
+                                  {timerState.phase === 'countdown' ? `Get ready… ${timerState.secondsLeft}` : `${timerState.secondsLeft}s…`}
                                 </div>
                                 <button
                                   onClick={() => cancelTimer(activeFlexDay.id, ex.id, idx)}
@@ -2441,7 +2473,7 @@ function ExerciseTracker() {
                           Clear
                         </button>
                         {(() => {
-                          const isEditable = justLoggedKey === `${activeFlexDay.id}:${ex.id}`;
+                          const isEditable = justLoggedKeys.has(`${activeFlexDay.id}:${ex.id}`);
                           return (
                             <button
                               onClick={() =>
@@ -2921,7 +2953,7 @@ function ExerciseTracker() {
                           Clear
                         </button>
                         {(() => {
-                          const isEditable = justLoggedKey === `${activeDay.id}:${ex.id}`;
+                          const isEditable = justLoggedKeys.has(`${activeDay.id}:${ex.id}`);
                           return (
                             <button
                               onClick={() =>
