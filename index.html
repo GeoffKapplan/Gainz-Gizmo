@@ -487,7 +487,7 @@ function defaultData() {
     // The active program: cycle order (day ids) plus which exercise ids have been logged
     // since the last time the cycle completed/reset. Forearms is excluded, matching the
     // desktop program (Upper 1 / Legs / Upper 2 / Arms N Shii only).
-    program: { order: days.slice(0, 4).map((d) => d.id), loggedIds: [] },
+    program: { order: days.slice(0, 4).map((d) => d.id), loggedIds: [], skippedIds: [] },
     sessionsCollapsed: false,
     activeDayId: days[0]?.id ?? null,
     ...defaultFlexData(),
@@ -524,7 +524,7 @@ function defaultFlexData() {
   return {
     flexLibrary: flexLibraryNames.map(([name, area]) => ({ id: genId('lib'), name, area })),
     flexDays,
-    flexProgram: { order: flexDays.map((d) => d.id), loggedIds: [] },
+    flexProgram: { order: flexDays.map((d) => d.id), loggedIds: [], skippedIds: [] },
     flexSessionsCollapsed: false,
     flexActiveDayId: flexDays[0]?.id ?? null,
   };
@@ -543,6 +543,7 @@ function normalize(parsed) {
   const savedOrder = parsed.program ? parsed.program.order || [] : dayIds;
   const order = savedOrder.filter((id) => dayIds.includes(id));
   const loggedIds = (parsed.program && parsed.program.loggedIds) || [];
+  const skippedIds = (parsed.program && parsed.program.skippedIds) || [];
   const activeDayId = dayIds.includes(parsed.activeDayId) ? parsed.activeDayId : dayIds[0] ?? null;
 
   // Flexibility side: if this save predates the feature entirely, seed it fresh rather than
@@ -554,6 +555,7 @@ function normalize(parsed) {
   const flexSavedOrder = hasFlex ? (parsed.flexProgram ? parsed.flexProgram.order || [] : flexDayIds) : flexSeed.flexProgram.order;
   const flexOrder = flexSavedOrder.filter((id) => flexDayIds.includes(id));
   const flexLoggedIds = hasFlex ? (parsed.flexProgram && parsed.flexProgram.loggedIds) || [] : [];
+  const flexSkippedIds = hasFlex ? (parsed.flexProgram && parsed.flexProgram.skippedIds) || [] : [];
   const flexActiveDayId = hasFlex
     ? flexDayIds.includes(parsed.flexActiveDayId)
       ? parsed.flexActiveDayId
@@ -569,20 +571,21 @@ function normalize(parsed) {
       muscleGroup: MUSCLE_GROUPS.includes(l.muscleGroup) ? l.muscleGroup : 'Other',
     })),
     days,
-    program: { order, loggedIds },
+    program: { order, loggedIds, skippedIds },
     sessionsCollapsed: typeof parsed.sessionsCollapsed === 'boolean' ? parsed.sessionsCollapsed : false,
     activeDayId,
     flexLibrary,
     flexDays,
-    flexProgram: { order: flexOrder, loggedIds: flexLoggedIds },
+    flexProgram: { order: flexOrder, loggedIds: flexLoggedIds, skippedIds: flexSkippedIds },
     flexSessionsCollapsed: typeof parsed.flexSessionsCollapsed === 'boolean' ? parsed.flexSessionsCollapsed : false,
     flexActiveDayId,
   };
 }
 
-// A day counts as "done" for the current cycle once every exercise in it has been logged.
-function dayIsComplete(day, loggedIds) {
-  return day.exercises.length > 0 && day.exercises.every((ex) => loggedIds.includes(ex.id));
+// A day counts as "done" for the current cycle once every exercise in it has either been
+// logged or explicitly skipped.
+function dayIsComplete(day, loggedIds, skippedIds = []) {
+  return day.exercises.length > 0 && day.exercises.every((ex) => loggedIds.includes(ex.id) || skippedIds.includes(ex.id));
 }
 
 function meaningfulSets(sets) {
@@ -1355,7 +1358,7 @@ function ExerciseTracker() {
       data.program.order.length > 0 &&
       data.program.order.every((id) => {
         const d = updatedDays.find((dd) => dd.id === id);
-        return d && dayIsComplete(d, loggedIds);
+        return d && dayIsComplete(d, loggedIds, data.program.skippedIds);
       });
 
     setData((prev) => {
@@ -1375,7 +1378,7 @@ function ExerciseTracker() {
       return {
         ...prev,
         days,
-        program: { ...prev.program, loggedIds: cycleComplete ? [] : loggedIds },
+        program: { ...prev.program, loggedIds: cycleComplete ? [] : loggedIds, skippedIds: cycleComplete ? [] : prev.program.skippedIds },
       };
     });
 
@@ -1384,6 +1387,49 @@ function ExerciseTracker() {
       showToast('Program cycle complete — reset for the next round');
     } else {
       markJustLogged(dayId, exId);
+    }
+  };
+
+  // Marks an exercise as intentionally skipped for this cycle (no data recorded), so the day
+  // and program can still be considered complete without pretending it was actually done.
+  const skipExercise = (dayId, exId) => {
+    if (data.program.skippedIds.includes(exId)) {
+      // Already skipped -- tapping again undoes it.
+      setData((prev) => ({ ...prev, program: { ...prev.program, skippedIds: prev.program.skippedIds.filter((id) => id !== exId) } }));
+      return;
+    }
+
+    const skippedIds = [...data.program.skippedIds, exId];
+    const cycleComplete =
+      data.program.order.length > 0 &&
+      data.program.order.every((id) => {
+        const d = data.days.find((dd) => dd.id === id);
+        return d && dayIsComplete(d, data.program.loggedIds, skippedIds);
+      });
+
+    setData((prev) => {
+      let days = prev.days;
+      if (cycleComplete) {
+        days = prev.days.map((d) =>
+          prev.program.order.includes(d.id)
+            ? { ...d, exercises: d.exercises.map((e) => ({ ...e, sets: e.sets.map(() => ({ weight: '', reps: '' })) })) }
+            : d
+        );
+      }
+      return {
+        ...prev,
+        days,
+        program: {
+          ...prev.program,
+          loggedIds: cycleComplete ? [] : prev.program.loggedIds,
+          skippedIds: cycleComplete ? [] : skippedIds,
+        },
+      };
+    });
+
+    if (cycleComplete) {
+      setJustLoggedKeys(new Set());
+      showToast('Program cycle complete — reset for the next round');
     }
   };
 
@@ -1822,7 +1868,7 @@ function ExerciseTracker() {
       data.flexProgram.order.length > 0 &&
       data.flexProgram.order.every((id) => {
         const d = updatedDays.find((dd) => dd.id === id);
-        return d && dayIsComplete(d, loggedIds);
+        return d && dayIsComplete(d, loggedIds, data.flexProgram.skippedIds);
       });
 
     setData((prev) => {
@@ -1839,7 +1885,11 @@ function ExerciseTracker() {
       return {
         ...prev,
         flexDays,
-        flexProgram: { ...prev.flexProgram, loggedIds: cycleComplete ? [] : loggedIds },
+        flexProgram: {
+          ...prev.flexProgram,
+          loggedIds: cycleComplete ? [] : loggedIds,
+          skippedIds: cycleComplete ? [] : prev.flexProgram.skippedIds,
+        },
       };
     });
 
@@ -1848,6 +1898,51 @@ function ExerciseTracker() {
       showToast('Flexibility cycle complete — reset for the next round');
     } else {
       markJustLogged(dayId, exId);
+    }
+  };
+
+  // Marks a stretch as intentionally skipped for this cycle (no data recorded), so the day
+  // and program can still be considered complete without pretending it was actually done.
+  const skipFlexExercise = (dayId, exId) => {
+    if (data.flexProgram.skippedIds.includes(exId)) {
+      setData((prev) => ({
+        ...prev,
+        flexProgram: { ...prev.flexProgram, skippedIds: prev.flexProgram.skippedIds.filter((id) => id !== exId) },
+      }));
+      return;
+    }
+
+    const skippedIds = [...data.flexProgram.skippedIds, exId];
+    const cycleComplete =
+      data.flexProgram.order.length > 0 &&
+      data.flexProgram.order.every((id) => {
+        const d = data.flexDays.find((dd) => dd.id === id);
+        return d && dayIsComplete(d, data.flexProgram.loggedIds, skippedIds);
+      });
+
+    setData((prev) => {
+      let flexDays = prev.flexDays;
+      if (cycleComplete) {
+        flexDays = prev.flexDays.map((d) =>
+          prev.flexProgram.order.includes(d.id)
+            ? { ...d, exercises: d.exercises.map((e) => ({ ...e, sets: e.sets.map(() => ({ completed: false })) })) }
+            : d
+        );
+      }
+      return {
+        ...prev,
+        flexDays,
+        flexProgram: {
+          ...prev.flexProgram,
+          loggedIds: cycleComplete ? [] : prev.flexProgram.loggedIds,
+          skippedIds: cycleComplete ? [] : skippedIds,
+        },
+      };
+    });
+
+    if (cycleComplete) {
+      setJustLoggedKeys(new Set());
+      showToast('Flexibility cycle complete — reset for the next round');
     }
   };
 
@@ -2131,7 +2226,7 @@ function ExerciseTracker() {
                     <span className="text-stone-700">
                       ({data.flexProgram.order.filter((id) => {
                         const d = data.flexDays.find((dd) => dd.id === id);
-                        return d && dayIsComplete(d, data.flexProgram.loggedIds);
+                        return d && dayIsComplete(d, data.flexProgram.loggedIds, data.flexProgram.skippedIds);
                       }).length}
                       /{data.flexProgram.order.length} complete)
                     </span>
@@ -2155,7 +2250,7 @@ function ExerciseTracker() {
                   {data.flexProgram.order.map((dayId) => {
                     const day = data.flexDays.find((d) => d.id === dayId);
                     if (!day) return null;
-                    const complete = dayIsComplete(day, data.flexProgram.loggedIds);
+                    const complete = dayIsComplete(day, data.flexProgram.loggedIds, data.flexProgram.skippedIds);
                     const isSelected = dayId === data.flexActiveDayId;
                     return (
                       <div
@@ -2303,6 +2398,11 @@ function ExerciseTracker() {
                             >
                               {areaForName(ex.name)}
                             </span>
+                            {data.flexProgram.skippedIds.includes(ex.id) && (
+                              <span className="shrink-0 text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded border bg-stone-800 text-stone-500 border-stone-700">
+                                Skipped
+                              </span>
+                            )}
                           </div>
                           <div className="flex items-center gap-0.5 shrink-0">
                             <IconButton onClick={() => setFlexSwapId(ex.id)} label="Swap stretch">
@@ -2466,11 +2566,23 @@ function ExerciseTracker() {
                     {/* Footer: log session, which becomes an Edit button right after logging */}
                     <div className="flex items-center justify-between px-3.5 py-2.5 bg-stone-950 border-t border-stone-800">
                       <span className="text-[11px] text-stone-600">
-                        {mergedHistory.length > 0 ? `Last logged ${formatDate(mergedHistory[0].date)}` : 'Not logged yet'}
+                        {data.flexProgram.skippedIds.includes(ex.id)
+                          ? 'Skipped this round'
+                          : mergedHistory.length > 0
+                          ? `Last logged ${formatDate(mergedHistory[0].date)}`
+                          : 'Not logged yet'}
                       </span>
                       <div className="flex items-center gap-2">
                         <button onClick={() => clearFlexSets(activeFlexDay.id, ex.id)} className="text-[11px] text-stone-600 hover:text-stone-400">
                           Clear
+                        </button>
+                        <button
+                          onClick={() => skipFlexExercise(activeFlexDay.id, ex.id)}
+                          className={`text-[11px] ${
+                            data.flexProgram.skippedIds.includes(ex.id) ? 'text-violet-400 hover:text-violet-300' : 'text-stone-600 hover:text-stone-400'
+                          }`}
+                        >
+                          {data.flexProgram.skippedIds.includes(ex.id) ? 'Undo skip' : 'Skip'}
                         </button>
                         {(() => {
                           const isEditable = justLoggedKeys.has(`${activeFlexDay.id}:${ex.id}`);
@@ -2510,7 +2622,7 @@ function ExerciseTracker() {
               {activeFlexDay &&
                 data.flexProgram.order.length > 1 &&
                 data.flexProgram.order.includes(activeFlexDay.id) &&
-                dayIsComplete(activeFlexDay, data.flexProgram.loggedIds) &&
+                dayIsComplete(activeFlexDay, data.flexProgram.loggedIds, data.flexProgram.skippedIds) &&
                 (() => {
                   const idx = data.flexProgram.order.indexOf(activeFlexDay.id);
                   const nextId = data.flexProgram.order[(idx + 1) % data.flexProgram.order.length];
@@ -2639,7 +2751,7 @@ function ExerciseTracker() {
                     <span className="text-stone-700">
                       ({data.program.order.filter((id) => {
                         const d = data.days.find((dd) => dd.id === id);
-                        return d && dayIsComplete(d, data.program.loggedIds);
+                        return d && dayIsComplete(d, data.program.loggedIds, data.program.skippedIds);
                       }).length}
                       /{data.program.order.length} complete)
                     </span>
@@ -2663,7 +2775,7 @@ function ExerciseTracker() {
                   {data.program.order.map((dayId) => {
                     const day = data.days.find((d) => d.id === dayId);
                     if (!day) return null;
-                    const complete = dayIsComplete(day, data.program.loggedIds);
+                    const complete = dayIsComplete(day, data.program.loggedIds, data.program.skippedIds);
                     const isSelected = dayId === data.activeDayId;
                     return (
                       <div
@@ -2807,6 +2919,11 @@ function ExerciseTracker() {
                             >
                               {groupForName(ex.name)}
                             </span>
+                            {data.program.skippedIds.includes(ex.id) && (
+                              <span className="shrink-0 text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded border bg-stone-800 text-stone-500 border-stone-700">
+                                Skipped
+                              </span>
+                            )}
                           </div>
                           <div className="flex items-center gap-0.5 shrink-0">
                             <IconButton onClick={() => setSwapId(ex.id)} label="Swap exercise">
@@ -2946,11 +3063,23 @@ function ExerciseTracker() {
                     {/* Footer: log session, which becomes an Edit button right after logging */}
                     <div className="flex items-center justify-between px-3.5 py-2.5 bg-stone-950 border-t border-stone-800">
                       <span className="text-[11px] text-stone-600">
-                        {mergedHistory.length > 0 ? `Last logged ${formatDate(mergedHistory[0].date)}` : 'Not logged yet'}
+                        {data.program.skippedIds.includes(ex.id)
+                          ? 'Skipped this round'
+                          : mergedHistory.length > 0
+                          ? `Last logged ${formatDate(mergedHistory[0].date)}`
+                          : 'Not logged yet'}
                       </span>
                       <div className="flex items-center gap-2">
                         <button onClick={() => clearSets(activeDay.id, ex.id)} className="text-[11px] text-stone-600 hover:text-stone-400">
                           Clear
+                        </button>
+                        <button
+                          onClick={() => skipExercise(activeDay.id, ex.id)}
+                          className={`text-[11px] ${
+                            data.program.skippedIds.includes(ex.id) ? 'text-cyan-500 hover:text-cyan-400' : 'text-stone-600 hover:text-stone-400'
+                          }`}
+                        >
+                          {data.program.skippedIds.includes(ex.id) ? 'Undo skip' : 'Skip'}
                         </button>
                         {(() => {
                           const isEditable = justLoggedKeys.has(`${activeDay.id}:${ex.id}`);
@@ -2990,7 +3119,7 @@ function ExerciseTracker() {
               {activeDay &&
                 data.program.order.length > 1 &&
                 data.program.order.includes(activeDay.id) &&
-                dayIsComplete(activeDay, data.program.loggedIds) &&
+                dayIsComplete(activeDay, data.program.loggedIds, data.program.skippedIds) &&
                 (() => {
                   const idx = data.program.order.indexOf(activeDay.id);
                   const nextId = data.program.order[(idx + 1) % data.program.order.length];
