@@ -761,6 +761,7 @@ function ExerciseTracker() {
   const [draggingExerciseId, setDraggingExerciseId] = useState(null);
   const [draggingDayId, setDraggingDayId] = useState(null);
   const [draggingProgramId, setDraggingProgramId] = useState(null);
+  const [reorderMode, setReorderMode] = useState(false); // explicit toggle: only in this mode do Sessions/Active Program show drag handles
   const [programDropHover, setProgramDropHover] = useState(false); // true while dragging a Sessions tab over the Active Program row
   const [toast, setToast] = useState(null); // { message, tone: 'success' | 'error' }
   const exerciseListRef = useRef(null);
@@ -789,6 +790,7 @@ function ExerciseTracker() {
   const [draggingFlexDayId, setDraggingFlexDayId] = useState(null);
   const [draggingFlexProgramId, setDraggingFlexProgramId] = useState(null);
   const [flexProgramDropHover, setFlexProgramDropHover] = useState(false);
+  const [flexReorderMode, setFlexReorderMode] = useState(false);
   const [activeTimers, setActiveTimers] = useState({}); // key: `${exId}:${setIdx}` -> seconds remaining
   const flexExerciseListRef = useRef(null);
   const flexExerciseDragState = useRef(null);
@@ -1061,57 +1063,29 @@ function ExerciseTracker() {
     setDraggingExerciseId(null);
   };
 
-  // Long-press to drag: a quick tap still selects the day, and a normal swipe still scrolls
-  // the row natively (nothing is touched until the hold succeeds). Once the hold engages, the
-  // row's own scrolling is hard-locked (via the overflow-x class on its container, toggled by
-  // draggingDayId in the render below) so the row can't drift out from under the drag.
+  // Drag-to-reorder for day tabs. Only active on the dedicated grip handle shown in reorder
+  // mode -- since that handle is a separate element from the tap-to-select button, there's no
+  // ambiguity to guess at: normal taps and scrolling are completely unaffected everywhere else,
+  // and dragging the handle always means "reorder" (or, over the Active Program row, "add to
+  // program"). The row's own scrolling is also hard-locked while a drag is in progress (via the
+  // overflow-x class toggled by draggingDayId in the render below).
   const handleDayPointerDown = (id) => (e) => {
-    const pointerId = e.pointerId;
-    const el = e.currentTarget;
-    const startX = e.clientX;
-    const startY = e.clientY;
-    const timer = setTimeout(() => {
-      const st = dayDragState.current;
-      if (!st) return;
-      st.dragging = true;
-      setDraggingDayId(id);
-      justDraggedDayRef.current = true; // a completed long-press shouldn't also trigger tap-to-select
-      try {
-        el.setPointerCapture(pointerId);
-      } catch (_) {}
-    }, 500);
-    dayDragState.current = { id, startX, startY, timer, dragging: false, el, pointerId };
+    e.preventDefault();
+    dayDragState.current = { id };
+    setDraggingDayId(id);
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch (_) {}
   };
 
   const handleDayPointerMove = (e) => {
     const st = dayDragState.current;
     if (!st) return;
-
-    if (!st.dragging) {
-      const dx = e.clientX - st.startX;
-      const dy = e.clientY - st.startY;
-      // Only clearly-vertical movement gets special early treatment (drag down onto Active
-      // Program) -- that's unambiguous since this row never scrolls vertically. Horizontal
-      // movement is left alone here (not cancelled) so a bit of natural drift while holding
-      // doesn't abort a genuine reorder attempt; the hold timer is what actually decides.
-      if (Math.abs(dy) > Math.abs(dx) && Math.abs(dy) > 10) {
-        clearTimeout(st.timer);
-        st.dragging = true;
-        setDraggingDayId(st.id);
-        justDraggedDayRef.current = true;
-        try {
-          st.el.setPointerCapture(st.pointerId);
-        } catch (_) {}
-      } else {
-        return;
-      }
-    }
-
     if (e.cancelable) e.preventDefault();
 
     // Dragging a session down over the Active Program row is a "drop to add" gesture —
-    // don't also try to reorder the Sessions tabs while doing that. Same generous padding as
-    // the actual drop check on release, so the highlight matches what will actually happen.
+    // don't also try to reorder the Sessions tabs while doing that. Generous padding so this
+    // doesn't need pixel-perfect precision.
     if (programListRef.current) {
       const rect = programListRef.current.getBoundingClientRect();
       const pad = 24;
@@ -1142,13 +1116,9 @@ function ExerciseTracker() {
 
   const handleDayPointerUp = (e) => {
     const st = dayDragState.current;
-    if (st && !st.dragging) {
-      clearTimeout(st.timer); // released before the hold fired -- just a normal tap
-    }
-    // Decide the drop using the release position itself (not the last-recorded hover flag,
-    // which could be a move-event or two stale) -- and give it generous padding, since people
+    // Decide the drop using the release position itself, with generous padding, since people
     // naturally drift their finger a little as they lift it right at the moment of release.
-    if (st && st.dragging && programListRef.current && e) {
+    if (st && programListRef.current && e) {
       const rect = programListRef.current.getBoundingClientRect();
       const pad = 24;
       const overProgram = e.clientY >= rect.top - pad && e.clientY <= rect.bottom + pad;
@@ -1157,11 +1127,6 @@ function ExerciseTracker() {
     setProgramDropHover(false);
     dayDragState.current = null;
     setDraggingDayId(null);
-    // Give the browser's click event (which fires right after pointerup) a chance to see the
-    // flag before it resets, so a drag doesn't also select the day it was dropped on.
-    setTimeout(() => {
-      justDraggedDayRef.current = false;
-    }, 50);
   };
 
   // Removing here only changes the program's rotation membership — the day itself,
@@ -1176,8 +1141,8 @@ function ExerciseTracker() {
     );
   };
 
-  // Adding here only happens by dragging a day down from the Sessions row above — see
-  // handleDayPointerUp.
+  // Adding here only happens by dragging a day down from the Sessions row above (via its
+  // reorder-mode handle) — see handleDayPointerUp.
   const addToProgram = (dayId) => {
     setData((prev) =>
       prev.program.order.includes(dayId)
@@ -1186,35 +1151,19 @@ function ExerciseTracker() {
     );
   };
 
-  // Same long-press pattern for the Active Program row's own reordering.
+  // Same immediate-drag pattern for the Active Program row's own handle.
   const handleProgramPointerDown = (id) => (e) => {
-    const pointerId = e.pointerId;
-    const el = e.currentTarget;
-    const startX = e.clientX;
-    const startY = e.clientY;
-    const timer = setTimeout(() => {
-      const st = programDragState.current;
-      if (!st) return;
-      st.dragging = true;
-      setDraggingProgramId(id);
-      justDraggedProgramRef.current = true;
-      try {
-        el.setPointerCapture(pointerId);
-      } catch (_) {}
-    }, 500);
-    programDragState.current = { id, startX, startY, timer, dragging: false, el, pointerId };
+    e.preventDefault();
+    programDragState.current = { id };
+    setDraggingProgramId(id);
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch (_) {}
   };
 
   const handleProgramPointerMove = (e) => {
     const st = programDragState.current;
     if (!st) return;
-
-    if (!st.dragging) {
-      // This row only ever reorders horizontally, so there's no unambiguous "early engage"
-      // direction here (unlike Sessions dragging down to it) -- just wait for the hold timer.
-      return;
-    }
-
     if (e.cancelable) e.preventDefault();
     if (!programListRef.current) return;
     const els = Array.from(programListRef.current.querySelectorAll('[data-sort-id]'));
@@ -1234,15 +1183,8 @@ function ExerciseTracker() {
   };
 
   const handleProgramPointerUp = () => {
-    const st = programDragState.current;
-    if (st && !st.dragging) {
-      clearTimeout(st.timer);
-    }
     programDragState.current = null;
     setDraggingProgramId(null);
-    setTimeout(() => {
-      justDraggedProgramRef.current = false;
-    }, 50);
   };
 
   const handleResetCycle = () => {
@@ -1628,43 +1570,17 @@ function ExerciseTracker() {
   };
 
   const handleFlexDayPointerDown = (id) => (e) => {
-    const pointerId = e.pointerId;
-    const el = e.currentTarget;
-    const startX = e.clientX;
-    const startY = e.clientY;
-    const timer = setTimeout(() => {
-      const st = flexDayDragState.current;
-      if (!st) return;
-      st.dragging = true;
-      setDraggingFlexDayId(id);
-      flexJustDraggedDayRef.current = true;
-      try {
-        el.setPointerCapture(pointerId);
-      } catch (_) {}
-    }, 500);
-    flexDayDragState.current = { id, startX, startY, timer, dragging: false, el, pointerId };
+    e.preventDefault();
+    flexDayDragState.current = { id };
+    setDraggingFlexDayId(id);
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch (_) {}
   };
 
   const handleFlexDayPointerMove = (e) => {
     const st = flexDayDragState.current;
     if (!st) return;
-
-    if (!st.dragging) {
-      const dx = e.clientX - st.startX;
-      const dy = e.clientY - st.startY;
-      if (Math.abs(dy) > Math.abs(dx) && Math.abs(dy) > 10) {
-        clearTimeout(st.timer);
-        st.dragging = true;
-        setDraggingFlexDayId(st.id);
-        flexJustDraggedDayRef.current = true;
-        try {
-          st.el.setPointerCapture(st.pointerId);
-        } catch (_) {}
-      } else {
-        return;
-      }
-    }
-
     if (e.cancelable) e.preventDefault();
 
     if (flexProgramListRef.current) {
@@ -1697,10 +1613,7 @@ function ExerciseTracker() {
 
   const handleFlexDayPointerUp = (e) => {
     const st = flexDayDragState.current;
-    if (st && !st.dragging) {
-      clearTimeout(st.timer);
-    }
-    if (st && st.dragging && flexProgramListRef.current && e) {
+    if (st && flexProgramListRef.current && e) {
       const rect = flexProgramListRef.current.getBoundingClientRect();
       const pad = 24;
       const overProgram = e.clientY >= rect.top - pad && e.clientY <= rect.bottom + pad;
@@ -1709,9 +1622,6 @@ function ExerciseTracker() {
     setFlexProgramDropHover(false);
     flexDayDragState.current = null;
     setDraggingFlexDayId(null);
-    setTimeout(() => {
-      flexJustDraggedDayRef.current = false;
-    }, 50);
   };
 
   const removeFromFlexProgram = (dayId, dayName) => {
@@ -1733,28 +1643,17 @@ function ExerciseTracker() {
   };
 
   const handleFlexProgramPointerDown = (id) => (e) => {
-    const pointerId = e.pointerId;
-    const el = e.currentTarget;
-    const startX = e.clientX;
-    const startY = e.clientY;
-    const timer = setTimeout(() => {
-      const st = flexProgramDragState.current;
-      if (!st) return;
-      st.dragging = true;
-      setDraggingFlexProgramId(id);
-      flexJustDraggedProgramRef.current = true;
-      try {
-        el.setPointerCapture(pointerId);
-      } catch (_) {}
-    }, 500);
-    flexProgramDragState.current = { id, startX, startY, timer, dragging: false, el, pointerId };
+    e.preventDefault();
+    flexProgramDragState.current = { id };
+    setDraggingFlexProgramId(id);
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch (_) {}
   };
 
   const handleFlexProgramPointerMove = (e) => {
     const st = flexProgramDragState.current;
     if (!st) return;
-    if (!st.dragging) return;
-
     if (e.cancelable) e.preventDefault();
     if (!flexProgramListRef.current) return;
     const els = Array.from(flexProgramListRef.current.querySelectorAll('[data-sort-id]'));
@@ -1774,15 +1673,8 @@ function ExerciseTracker() {
   };
 
   const handleFlexProgramPointerUp = () => {
-    const st = flexProgramDragState.current;
-    if (st && !st.dragging) {
-      clearTimeout(st.timer);
-    }
     flexProgramDragState.current = null;
     setDraggingFlexProgramId(null);
-    setTimeout(() => {
-      flexJustDraggedProgramRef.current = false;
-    }, 50);
   };
 
   const handleResetFlexCycle = () => {
@@ -2144,38 +2036,58 @@ function ExerciseTracker() {
         ) : view === 'flexLog' ? (
           <>
             {/* Day tabs */}
-            <button
-              onClick={() => setData((prev) => ({ ...prev, flexSessionsCollapsed: !prev.flexSessionsCollapsed }))}
-              className="flex items-center gap-1 text-[11px] font-bold uppercase tracking-wide text-stone-500 hover:text-stone-300 mb-1.5"
-            >
-              {data.flexSessionsCollapsed ? <ChevronDown className="w-3 h-3" /> : <ChevronUp className="w-3 h-3" />}
-              Sessions
-            </button>
+            <div className="flex items-center justify-between mb-1.5">
+              <button
+                onClick={() => setData((prev) => ({ ...prev, flexSessionsCollapsed: !prev.flexSessionsCollapsed }))}
+                className="flex items-center gap-1 text-[11px] font-bold uppercase tracking-wide text-stone-500 hover:text-stone-300"
+              >
+                {data.flexSessionsCollapsed ? <ChevronDown className="w-3 h-3" /> : <ChevronUp className="w-3 h-3" />}
+                Sessions
+              </button>
+              <button
+                onClick={() => setFlexReorderMode((v) => !v)}
+                className={`text-[11px] font-bold uppercase tracking-wide ${
+                  flexReorderMode ? 'text-violet-400 hover:text-violet-300' : 'text-stone-600 hover:text-stone-400'
+                }`}
+              >
+                {flexReorderMode ? 'Done' : 'Reorder'}
+              </button>
+            </div>
             {!data.flexSessionsCollapsed && (
             <div
               ref={flexDayTabsRef}
               className={`flex items-center gap-1.5 pb-1 mb-5 -mx-1 px-1 ${draggingFlexDayId ? 'overflow-x-hidden' : 'overflow-x-auto'}`}
             >
               {data.flexDays.map((d) => (
-                <button
+                <div
                   key={d.id}
                   data-sort-id={d.id}
-                  onPointerDown={handleFlexDayPointerDown(d.id)}
-                  onPointerMove={handleFlexDayPointerMove}
-                  onPointerUp={handleFlexDayPointerUp}
-                  onPointerCancel={handleFlexDayPointerUp}
-                  onClick={() => {
-                    if (flexJustDraggedDayRef.current) return;
-                    setActiveFlexDayId(d.id);
-                  }}
-                  className={`shrink-0 px-3.5 py-2 rounded-md text-sm font-bold uppercase tracking-wide transition-all select-none ${
+                  className={`shrink-0 flex items-center rounded-md text-sm font-bold uppercase tracking-wide transition-all select-none ${
                     d.id === data.flexActiveDayId
                       ? 'bg-violet-400 text-stone-950'
                       : 'bg-stone-900 text-stone-400 hover:bg-stone-800 hover:text-stone-200'
                   } ${draggingFlexDayId === d.id ? 'opacity-70 ring-2 ring-violet-300 scale-105' : ''}`}
                 >
-                  {d.name}
-                </button>
+                  {flexReorderMode && (
+                    <button
+                      onPointerDown={handleFlexDayPointerDown(d.id)}
+                      onPointerMove={handleFlexDayPointerMove}
+                      onPointerUp={handleFlexDayPointerUp}
+                      onPointerCancel={handleFlexDayPointerUp}
+                      style={{ touchAction: 'none' }}
+                      className="pl-2 pr-0.5 py-2 cursor-grab active:cursor-grabbing opacity-70"
+                      aria-label={`Reorder ${d.name}`}
+                    >
+                      <GripVertical className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                  <button
+                    onClick={() => setActiveFlexDayId(d.id)}
+                    className={flexReorderMode ? 'pl-1 pr-3.5 py-2' : 'px-3.5 py-2'}
+                  >
+                    {d.name}
+                  </button>
+                </div>
               ))}
               {addingFlexDay ? (
                 <div className="shrink-0 flex items-center gap-1 bg-stone-900 rounded-md px-2 py-1">
@@ -2257,19 +2169,25 @@ function ExerciseTracker() {
                         }`}
                       >
                         <button
-                          onPointerDown={handleFlexProgramPointerDown(dayId)}
-                          onPointerMove={handleFlexProgramPointerMove}
-                          onPointerUp={handleFlexProgramPointerUp}
-                          onPointerCancel={handleFlexProgramPointerUp}
-                          onClick={() => {
-                            if (flexJustDraggedProgramRef.current) return;
-                            setActiveFlexDayId(dayId);
-                          }}
-                          className="pl-3 pr-1 py-2 flex items-center gap-1.5"
+                          onClick={() => setActiveFlexDayId(dayId)}
+                          className={`flex items-center gap-1.5 py-2 ${flexReorderMode ? 'pl-1 pr-1' : 'pl-3 pr-1'}`}
                         >
                           {complete && <Check className="w-3.5 h-3.5" />}
                           {day.name}
                         </button>
+                        {flexReorderMode && (
+                          <button
+                            onPointerDown={handleFlexProgramPointerDown(dayId)}
+                            onPointerMove={handleFlexProgramPointerMove}
+                            onPointerUp={handleFlexProgramPointerUp}
+                            onPointerCancel={handleFlexProgramPointerUp}
+                            style={{ touchAction: 'none' }}
+                            className="pl-1 pr-1 py-2 opacity-70 cursor-grab active:cursor-grabbing"
+                            aria-label={`Reorder ${day.name} in program`}
+                          >
+                            <GripVertical className="w-3.5 h-3.5" />
+                          </button>
+                        )}
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
@@ -2672,38 +2590,58 @@ function ExerciseTracker() {
         ) : (
           <>
             {/* Day tabs */}
-            <button
-              onClick={() => setData((prev) => ({ ...prev, sessionsCollapsed: !prev.sessionsCollapsed }))}
-              className="flex items-center gap-1 text-[11px] font-bold uppercase tracking-wide text-stone-500 hover:text-stone-300 mb-1.5"
-            >
-              {data.sessionsCollapsed ? <ChevronDown className="w-3 h-3" /> : <ChevronUp className="w-3 h-3" />}
-              Sessions
-            </button>
+            <div className="flex items-center justify-between mb-1.5">
+              <button
+                onClick={() => setData((prev) => ({ ...prev, sessionsCollapsed: !prev.sessionsCollapsed }))}
+                className="flex items-center gap-1 text-[11px] font-bold uppercase tracking-wide text-stone-500 hover:text-stone-300"
+              >
+                {data.sessionsCollapsed ? <ChevronDown className="w-3 h-3" /> : <ChevronUp className="w-3 h-3" />}
+                Sessions
+              </button>
+              <button
+                onClick={() => setReorderMode((v) => !v)}
+                className={`text-[11px] font-bold uppercase tracking-wide ${
+                  reorderMode ? 'text-cyan-500 hover:text-cyan-400' : 'text-stone-600 hover:text-stone-400'
+                }`}
+              >
+                {reorderMode ? 'Done' : 'Reorder'}
+              </button>
+            </div>
             {!data.sessionsCollapsed && (
             <div
               ref={dayTabsRef}
               className={`flex items-center gap-1.5 pb-1 mb-5 -mx-1 px-1 ${draggingDayId ? 'overflow-x-hidden' : 'overflow-x-auto'}`}
             >
               {data.days.map((d) => (
-                <button
+                <div
                   key={d.id}
                   data-sort-id={d.id}
-                  onPointerDown={handleDayPointerDown(d.id)}
-                  onPointerMove={handleDayPointerMove}
-                  onPointerUp={handleDayPointerUp}
-                  onPointerCancel={handleDayPointerUp}
-                  onClick={() => {
-                    if (justDraggedDayRef.current) return;
-                    setActiveDayId(d.id);
-                  }}
-                  className={`shrink-0 px-3.5 py-2 rounded-md text-sm font-bold uppercase tracking-wide transition-all select-none ${
+                  className={`shrink-0 flex items-center rounded-md text-sm font-bold uppercase tracking-wide transition-all select-none ${
                     d.id === data.activeDayId
                       ? 'bg-cyan-600 text-stone-950'
                       : 'bg-stone-900 text-stone-400 hover:bg-stone-800 hover:text-stone-200'
                   } ${draggingDayId === d.id ? 'opacity-70 ring-2 ring-cyan-400 scale-105' : ''}`}
                 >
-                  {d.name}
-                </button>
+                  {reorderMode && (
+                    <button
+                      onPointerDown={handleDayPointerDown(d.id)}
+                      onPointerMove={handleDayPointerMove}
+                      onPointerUp={handleDayPointerUp}
+                      onPointerCancel={handleDayPointerUp}
+                      style={{ touchAction: 'none' }}
+                      className="pl-2 pr-0.5 py-2 cursor-grab active:cursor-grabbing opacity-70"
+                      aria-label={`Reorder ${d.name}`}
+                    >
+                      <GripVertical className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                  <button
+                    onClick={() => setActiveDayId(d.id)}
+                    className={reorderMode ? 'pl-1 pr-3.5 py-2' : 'px-3.5 py-2'}
+                  >
+                    {d.name}
+                  </button>
+                </div>
               ))}
               {addingDay ? (
                 <div className="shrink-0 flex items-center gap-1 bg-stone-900 rounded-md px-2 py-1">
@@ -2785,19 +2723,25 @@ function ExerciseTracker() {
                         }`}
                       >
                         <button
-                          onPointerDown={handleProgramPointerDown(dayId)}
-                          onPointerMove={handleProgramPointerMove}
-                          onPointerUp={handleProgramPointerUp}
-                          onPointerCancel={handleProgramPointerUp}
-                          onClick={() => {
-                            if (justDraggedProgramRef.current) return;
-                            setActiveDayId(dayId);
-                          }}
-                          className="pl-3 pr-1 py-2 flex items-center gap-1.5"
+                          onClick={() => setActiveDayId(dayId)}
+                          className={`flex items-center gap-1.5 py-2 ${reorderMode ? 'pl-1 pr-1' : 'pl-3 pr-1'}`}
                         >
                           {complete && <Check className="w-3.5 h-3.5" />}
                           {day.name}
                         </button>
+                        {reorderMode && (
+                          <button
+                            onPointerDown={handleProgramPointerDown(dayId)}
+                            onPointerMove={handleProgramPointerMove}
+                            onPointerUp={handleProgramPointerUp}
+                            onPointerCancel={handleProgramPointerUp}
+                            style={{ touchAction: 'none' }}
+                            className="pl-1 pr-1 py-2 opacity-70 cursor-grab active:cursor-grabbing"
+                            aria-label={`Reorder ${day.name} in program`}
+                          >
+                            <GripVertical className="w-3.5 h-3.5" />
+                          </button>
+                        )}
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
