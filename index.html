@@ -1090,25 +1090,22 @@ function ExerciseTracker() {
     if (!st.dragging) {
       const dx = e.clientX - st.startX;
       const dy = e.clientY - st.startY;
-      if (Math.hypot(dx, dy) > 10) {
-        if (Math.abs(dy) > Math.abs(dx)) {
-          // Mostly vertical movement -- this row only ever scrolls horizontally, so this can
-          // only mean "drag down to drop onto Active Program". Engage immediately rather than
-          // making the person hold still first, since that gesture isn't ambiguous with scrolling.
-          clearTimeout(st.timer);
-          st.dragging = true;
-          setDraggingDayId(st.id);
-          justDraggedDayRef.current = true;
-          try {
-            st.el.setPointerCapture(st.pointerId);
-          } catch (_) {}
-        } else {
-          // Mostly horizontal movement -- this is a scroll swipe, not a hold, so cancel the
-          // pending drag and let the browser scroll normally.
-          clearTimeout(st.timer);
-          dayDragState.current = null;
-          return;
-        }
+      // Only clearly-vertical movement gets special early treatment (drag down onto Active
+      // Program) -- that's unambiguous since this row never scrolls vertically. Horizontal
+      // movement is deliberately left alone here: it's the same axis as both scrolling *and*
+      // reordering, so we don't try to guess which one you mean from a few pixels of drift --
+      // we just keep waiting for the hold timer, which is the actual signal that you meant to
+      // drag rather than scroll. (Cancelling early on any horizontal movement, which is what
+      // this used to do, meant you had to hold perfectly still for the full 500ms before
+      // moving at all -- unnatural, and why reordering felt unreliable.)
+      if (Math.abs(dy) > Math.abs(dx) && Math.abs(dy) > 10) {
+        clearTimeout(st.timer);
+        st.dragging = true;
+        setDraggingDayId(st.id);
+        justDraggedDayRef.current = true;
+        try {
+          st.el.setPointerCapture(st.pointerId);
+        } catch (_) {}
       } else {
         return;
       }
@@ -1209,13 +1206,11 @@ function ExerciseTracker() {
     const st = programDragState.current;
     if (!st) return;
 
-    if (!st.dragging) {
-      if (Math.hypot(e.clientX - st.startX, e.clientY - st.startY) > 10) {
-        clearTimeout(st.timer);
-        programDragState.current = null;
-      }
-      return;
-    }
+    // Just wait for the hold timer to fire -- don't cancel on early movement. This row only
+    // ever reorders horizontally, so any movement here is plausibly the start of a legitimate
+    // drag; cancelling early (like this used to) meant you had to hold perfectly still for the
+    // full 500ms before moving at all, which made reordering feel unreliable.
+    if (!st.dragging) return;
 
     if (e.cancelable) e.preventDefault();
     if (!programListRef.current) return;
@@ -1654,20 +1649,17 @@ function ExerciseTracker() {
     if (!st.dragging) {
       const dx = e.clientX - st.startX;
       const dy = e.clientY - st.startY;
-      if (Math.hypot(dx, dy) > 10) {
-        if (Math.abs(dy) > Math.abs(dx)) {
-          clearTimeout(st.timer);
-          st.dragging = true;
-          setDraggingFlexDayId(st.id);
-          flexJustDraggedDayRef.current = true;
-          try {
-            st.el.setPointerCapture(st.pointerId);
-          } catch (_) {}
-        } else {
-          clearTimeout(st.timer);
-          flexDayDragState.current = null;
-          return;
-        }
+      // Only clearly-vertical movement gets special early treatment (drag down onto Active
+      // Program); horizontal movement is left alone and just keeps waiting for the hold timer
+      // -- see the strength-side handleDayPointerMove for why.
+      if (Math.abs(dy) > Math.abs(dx) && Math.abs(dy) > 10) {
+        clearTimeout(st.timer);
+        st.dragging = true;
+        setDraggingFlexDayId(st.id);
+        flexJustDraggedDayRef.current = true;
+        try {
+          st.el.setPointerCapture(st.pointerId);
+        } catch (_) {}
       } else {
         return;
       }
@@ -1758,13 +1750,7 @@ function ExerciseTracker() {
     const st = flexProgramDragState.current;
     if (!st) return;
 
-    if (!st.dragging) {
-      if (Math.hypot(e.clientX - st.startX, e.clientY - st.startY) > 10) {
-        clearTimeout(st.timer);
-        flexProgramDragState.current = null;
-      }
-      return;
-    }
+    if (!st.dragging) return; // just wait for the hold timer; don't cancel on early movement
 
     if (e.cancelable) e.preventDefault();
     if (!flexProgramListRef.current) return;
