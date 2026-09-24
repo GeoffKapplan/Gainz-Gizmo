@@ -1061,10 +1061,10 @@ function ExerciseTracker() {
     setDraggingExerciseId(null);
   };
 
-  // Drag-to-reorder for day tabs. Same pattern, horizontal axis.
   // Long-press to drag: a quick tap still selects the day, and a normal swipe still scrolls
-  // the row natively (we don't block anything until the hold succeeds), so there's no
-  // permanent "handle" hitbox competing with everyday taps/scrolls.
+  // the row natively (nothing is touched until the hold succeeds). Once the hold engages, the
+  // row's own scrolling is hard-locked (via the overflow-x class on its container, toggled by
+  // draggingDayId in the render below) so the row can't drift out from under the drag.
   const handleDayPointerDown = (id) => (e) => {
     const pointerId = e.pointerId;
     const el = e.currentTarget;
@@ -1092,12 +1092,8 @@ function ExerciseTracker() {
       const dy = e.clientY - st.startY;
       // Only clearly-vertical movement gets special early treatment (drag down onto Active
       // Program) -- that's unambiguous since this row never scrolls vertically. Horizontal
-      // movement is deliberately left alone here: it's the same axis as both scrolling *and*
-      // reordering, so we don't try to guess which one you mean from a few pixels of drift --
-      // we just keep waiting for the hold timer, which is the actual signal that you meant to
-      // drag rather than scroll. (Cancelling early on any horizontal movement, which is what
-      // this used to do, meant you had to hold perfectly still for the full 500ms before
-      // moving at all -- unnatural, and why reordering felt unreliable.)
+      // movement is left alone here (not cancelled) so a bit of natural drift while holding
+      // doesn't abort a genuine reorder attempt; the hold timer is what actually decides.
       if (Math.abs(dy) > Math.abs(dx) && Math.abs(dy) > 10) {
         clearTimeout(st.timer);
         st.dragging = true;
@@ -1114,10 +1110,12 @@ function ExerciseTracker() {
     if (e.cancelable) e.preventDefault();
 
     // Dragging a session down over the Active Program row is a "drop to add" gesture —
-    // don't also try to reorder the Sessions tabs while doing that.
+    // don't also try to reorder the Sessions tabs while doing that. Same generous padding as
+    // the actual drop check on release, so the highlight matches what will actually happen.
     if (programListRef.current) {
       const rect = programListRef.current.getBoundingClientRect();
-      const overProgram = e.clientY >= rect.top && e.clientY <= rect.bottom;
+      const pad = 24;
+      const overProgram = e.clientY >= rect.top - pad && e.clientY <= rect.bottom + pad;
       if (overProgram) {
         setProgramDropHover(true);
         return;
@@ -1142,13 +1140,19 @@ function ExerciseTracker() {
     }
   };
 
-  const handleDayPointerUp = () => {
+  const handleDayPointerUp = (e) => {
     const st = dayDragState.current;
     if (st && !st.dragging) {
       clearTimeout(st.timer); // released before the hold fired -- just a normal tap
     }
-    if (st && st.dragging && programDropHover) {
-      addToProgram(st.id);
+    // Decide the drop using the release position itself (not the last-recorded hover flag,
+    // which could be a move-event or two stale) -- and give it generous padding, since people
+    // naturally drift their finger a little as they lift it right at the moment of release.
+    if (st && st.dragging && programListRef.current && e) {
+      const rect = programListRef.current.getBoundingClientRect();
+      const pad = 24;
+      const overProgram = e.clientY >= rect.top - pad && e.clientY <= rect.bottom + pad;
+      if (overProgram) addToProgram(st.id);
     }
     setProgramDropHover(false);
     dayDragState.current = null;
@@ -1172,8 +1176,8 @@ function ExerciseTracker() {
     );
   };
 
-  // Adding here only happens by dragging (or the Sessions tab won't add-by-click) a day down
-  // from the Sessions row above — see handleDayPointerUp.
+  // Adding here only happens by dragging a day down from the Sessions row above — see
+  // handleDayPointerUp.
   const addToProgram = (dayId) => {
     setData((prev) =>
       prev.program.order.includes(dayId)
@@ -1182,8 +1186,7 @@ function ExerciseTracker() {
     );
   };
 
-  // Long-press to drag within the Active Program row -- same pattern as Sessions: a quick tap
-  // still selects the day, and a swipe still scrolls the row, only a sustained hold drags.
+  // Same long-press pattern for the Active Program row's own reordering.
   const handleProgramPointerDown = (id) => (e) => {
     const pointerId = e.pointerId;
     const el = e.currentTarget;
@@ -1194,23 +1197,23 @@ function ExerciseTracker() {
       if (!st) return;
       st.dragging = true;
       setDraggingProgramId(id);
-      justDraggedProgramRef.current = true; // a completed long-press shouldn't also trigger tap-to-select
+      justDraggedProgramRef.current = true;
       try {
         el.setPointerCapture(pointerId);
       } catch (_) {}
     }, 500);
-    programDragState.current = { id, startX, startY, timer, dragging: false };
+    programDragState.current = { id, startX, startY, timer, dragging: false, el, pointerId };
   };
 
   const handleProgramPointerMove = (e) => {
     const st = programDragState.current;
     if (!st) return;
 
-    // Just wait for the hold timer to fire -- don't cancel on early movement. This row only
-    // ever reorders horizontally, so any movement here is plausibly the start of a legitimate
-    // drag; cancelling early (like this used to) meant you had to hold perfectly still for the
-    // full 500ms before moving at all, which made reordering feel unreliable.
-    if (!st.dragging) return;
+    if (!st.dragging) {
+      // This row only ever reorders horizontally, so there's no unambiguous "early engage"
+      // direction here (unlike Sessions dragging down to it) -- just wait for the hold timer.
+      return;
+    }
 
     if (e.cancelable) e.preventDefault();
     if (!programListRef.current) return;
@@ -1233,7 +1236,7 @@ function ExerciseTracker() {
   const handleProgramPointerUp = () => {
     const st = programDragState.current;
     if (st && !st.dragging) {
-      clearTimeout(st.timer); // released before the hold fired -- just a normal tap
+      clearTimeout(st.timer);
     }
     programDragState.current = null;
     setDraggingProgramId(null);
@@ -1649,9 +1652,6 @@ function ExerciseTracker() {
     if (!st.dragging) {
       const dx = e.clientX - st.startX;
       const dy = e.clientY - st.startY;
-      // Only clearly-vertical movement gets special early treatment (drag down onto Active
-      // Program); horizontal movement is left alone and just keeps waiting for the hold timer
-      // -- see the strength-side handleDayPointerMove for why.
       if (Math.abs(dy) > Math.abs(dx) && Math.abs(dy) > 10) {
         clearTimeout(st.timer);
         st.dragging = true;
@@ -1669,7 +1669,8 @@ function ExerciseTracker() {
 
     if (flexProgramListRef.current) {
       const rect = flexProgramListRef.current.getBoundingClientRect();
-      const overProgram = e.clientY >= rect.top && e.clientY <= rect.bottom;
+      const pad = 24;
+      const overProgram = e.clientY >= rect.top - pad && e.clientY <= rect.bottom + pad;
       if (overProgram) {
         setFlexProgramDropHover(true);
         return;
@@ -1694,13 +1695,16 @@ function ExerciseTracker() {
     }
   };
 
-  const handleFlexDayPointerUp = () => {
+  const handleFlexDayPointerUp = (e) => {
     const st = flexDayDragState.current;
     if (st && !st.dragging) {
       clearTimeout(st.timer);
     }
-    if (st && st.dragging && flexProgramDropHover) {
-      addToFlexProgram(st.id);
+    if (st && st.dragging && flexProgramListRef.current && e) {
+      const rect = flexProgramListRef.current.getBoundingClientRect();
+      const pad = 24;
+      const overProgram = e.clientY >= rect.top - pad && e.clientY <= rect.bottom + pad;
+      if (overProgram) addToFlexProgram(st.id);
     }
     setFlexProgramDropHover(false);
     flexDayDragState.current = null;
@@ -1743,14 +1747,13 @@ function ExerciseTracker() {
         el.setPointerCapture(pointerId);
       } catch (_) {}
     }, 500);
-    flexProgramDragState.current = { id, startX, startY, timer, dragging: false };
+    flexProgramDragState.current = { id, startX, startY, timer, dragging: false, el, pointerId };
   };
 
   const handleFlexProgramPointerMove = (e) => {
     const st = flexProgramDragState.current;
     if (!st) return;
-
-    if (!st.dragging) return; // just wait for the hold timer; don't cancel on early movement
+    if (!st.dragging) return;
 
     if (e.cancelable) e.preventDefault();
     if (!flexProgramListRef.current) return;
@@ -2149,7 +2152,10 @@ function ExerciseTracker() {
               Sessions
             </button>
             {!data.flexSessionsCollapsed && (
-            <div ref={flexDayTabsRef} className="flex items-center gap-1.5 overflow-x-auto pb-1 mb-5 -mx-1 px-1">
+            <div
+              ref={flexDayTabsRef}
+              className={`flex items-center gap-1.5 pb-1 mb-5 -mx-1 px-1 ${draggingFlexDayId ? 'overflow-x-hidden' : 'overflow-x-auto'}`}
+            >
               {data.flexDays.map((d) => (
                 <button
                   key={d.id}
@@ -2229,9 +2235,9 @@ function ExerciseTracker() {
                 <div
                   ref={flexProgramListRef}
                   style={{ minHeight: '2.75rem' }}
-                  className={`flex items-center gap-1.5 overflow-x-auto pb-1 -mx-1 px-1 rounded-md transition-colors ${
-                    flexProgramDropHover ? 'bg-violet-500/10 ring-2 ring-violet-500/50' : ''
-                  }`}
+                  className={`flex items-center gap-1.5 pb-1 -mx-1 px-1 rounded-md transition-colors ${
+                    draggingFlexProgramId ? 'overflow-x-hidden' : 'overflow-x-auto'
+                  } ${flexProgramDropHover ? 'bg-violet-500/10 ring-2 ring-violet-500/50' : ''}`}
                 >
                   {data.flexProgram.order.map((dayId) => {
                     const day = data.flexDays.find((d) => d.id === dayId);
@@ -2674,7 +2680,10 @@ function ExerciseTracker() {
               Sessions
             </button>
             {!data.sessionsCollapsed && (
-            <div ref={dayTabsRef} className="flex items-center gap-1.5 overflow-x-auto pb-1 mb-5 -mx-1 px-1">
+            <div
+              ref={dayTabsRef}
+              className={`flex items-center gap-1.5 pb-1 mb-5 -mx-1 px-1 ${draggingDayId ? 'overflow-x-hidden' : 'overflow-x-auto'}`}
+            >
               {data.days.map((d) => (
                 <button
                   key={d.id}
@@ -2754,9 +2763,9 @@ function ExerciseTracker() {
                 <div
                   ref={programListRef}
                   style={{ minHeight: '2.75rem' }}
-                  className={`flex items-center gap-1.5 overflow-x-auto pb-1 -mx-1 px-1 rounded-md transition-colors ${
-                    programDropHover ? 'bg-cyan-500/10 ring-2 ring-cyan-500/50' : ''
-                  }`}
+                  className={`flex items-center gap-1.5 pb-1 -mx-1 px-1 rounded-md transition-colors ${
+                    draggingProgramId ? 'overflow-x-hidden' : 'overflow-x-auto'
+                  } ${programDropHover ? 'bg-cyan-500/10 ring-2 ring-cyan-500/50' : ''}`}
                 >
                   {data.program.order.map((dayId) => {
                     const day = data.days.find((d) => d.id === dayId);
