@@ -1,3787 +1,784 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
-<title>Gainz Gizmo</title>
-
-<meta name="apple-mobile-web-app-capable" content="yes" />
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-<meta name="apple-mobile-web-app-title" content="Gainz Gizmo" />
-<meta name="mobile-web-app-capable" content="yes" />
-<meta name="theme-color" content="#0c0a09" />
-<link rel="apple-touch-icon" href="icon-192.png" />
-<link rel="icon" href="icon-192.png" />
-<link rel="shortcut icon" href="favicon.ico" />
-
-<link rel="manifest" href="manifest.json" />
-<script>
-  if ('serviceWorker' in navigator) {
-    window.addEventListener('load', () => navigator.serviceWorker.register('sw.js'));
-  }
-</script>
-
-<script src="https://cdn.tailwindcss.com"></script>
-
-<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-
-<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>PSMF Companion</title>
 <style>
-  html, body { background: #0c0a09; margin: 0; }
+  :root {
+    --accent: #2563eb;
+    --bg: #f9fafb;
+    --card-bg: #ffffff;
+    --border: #e5e7eb;
+    --text: #1f2937;
+    --muted: #9ca3af;
+    --ice: #eff6ff;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+
+  /* ---- Tab bar ---- */
+  .tabbar {
+    position: sticky;
+    top: env(safe-area-inset-top, 0px);
+    z-index: 20;
+    display: flex;
+    background: var(--card-bg);
+    border-bottom: 1px solid var(--border);
+  }
+  .tabbtn {
+    flex: 1;
+    padding: 13px 4px;
+    text-align: center;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--muted);
+    background: none;
+    border: none;
+    border-bottom: 3px solid transparent;
+    cursor: pointer;
+  }
+  .tabbtn.active { color: var(--accent); border-bottom-color: var(--accent); }
+  .tabpanel { display: none; padding: 16px; padding-bottom: 60px; }
+  .tabpanel.active { display: block; }
+
+  h1.page-title { font-size: 20px; margin: 4px 0 14px 0; }
+  .subtitle { color: var(--muted); font-size: 13px; margin-bottom: 18px; }
+
+  h2.section-title {
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--accent);
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    margin: 22px 0 10px 0;
+  }
+
+  /* ---- Shared table styling (meal plan + freezer + macros) ---- */
+  table.plan-table {
+    width: 100%;
+    border-collapse: collapse;
+    background: var(--card-bg);
+    border-radius: 12px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    font-size: 13px;
+  }
+  table.plan-table th, table.plan-table td {
+    text-align: left;
+    padding: 10px;
+    border-bottom: 1px solid var(--border);
+  }
+  table.plan-table th {
+    background: #f3f4f6;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: var(--muted);
+  }
+  table.plan-table tr:last-child td { border-bottom: none; }
+  .day-col { font-weight: 600; white-space: nowrap; }
+  .num { text-align: right; font-variant-numeric: tabular-nums; }
+  .avg-row td { font-weight: 700; background: #f9fafb; }
+  .meal-cell {
+    cursor: pointer;
+    text-decoration: underline;
+    text-decoration-style: dotted;
+    text-decoration-color: var(--muted);
+  }
+  .meal-cell:active { color: var(--accent); }
+
+  /* ---- Recipe bottom sheet (shared by meal plan tab) ---- */
+  .overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(17,24,39,0.45);
+    z-index: 50;
+    align-items: flex-end;
+    justify-content: center;
+  }
+  .overlay.open { display: flex; }
+  .sheet {
+    background: var(--card-bg);
+    width: 100%;
+    max-width: 480px;
+    max-height: 82vh;
+    overflow-y: auto;
+    border-radius: 16px 16px 0 0;
+    padding: 18px 20px 26px 20px;
+    box-sizing: border-box;
+    position: relative;
+  }
+  .sheet-handle { width: 40px; height: 4px; background: var(--border); border-radius: 999px; margin: 0 auto 14px auto; }
+  .sheet-title { font-size: 18px; font-weight: 700; margin: 0 0 2px 0; }
+  .sheet-days {
+    display: inline-block; font-size: 11px; color: var(--accent); background: var(--ice);
+    padding: 2px 9px; border-radius: 999px; margin-bottom: 12px;
+  }
+  .sheet h3 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.03em; color: var(--muted); margin: 16px 0 6px 0; }
+  .sheet ul, .sheet ol { margin: 0; padding-left: 20px; font-size: 14px; line-height: 1.6; }
+  .sheet li { margin-bottom: 4px; }
+  .macro-row { display: flex; gap: 8px; margin-top: 6px; }
+  .macro-pill { flex: 1; background: #f3f4f6; border-radius: 8px; padding: 8px 4px; text-align: center; }
+  .macro-pill .val { font-size: 15px; font-weight: 700; }
+  .macro-pill .lbl { font-size: 10px; color: var(--muted); text-transform: uppercase; }
+  .close-btn {
+    position: absolute; top: 14px; right: 16px; background: #f3f4f6; border: none; border-radius: 50%;
+    width: 28px; height: 28px; font-size: 16px; color: var(--muted); cursor: pointer;
+  }
+
+  /* ---- Freezer tab ---- */
+  .day-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; margin-bottom: 20px; }
+  .day-btn {
+    background: var(--card-bg); border: 1.5px solid var(--border); border-radius: 10px;
+    padding: 10px 2px; text-align: center; font-size: 12px; font-weight: 600; cursor: pointer;
+  }
+  .day-btn.active { background: var(--accent); border-color: var(--accent); color: white; }
+  .freezer-result { background: var(--card-bg); border: 1px solid var(--border); border-radius: 14px; padding: 18px; }
+  .freezer-result h3 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); margin: 0 0 8px 0; }
+  .today-meals { font-size: 15px; margin-bottom: 18px; padding-bottom: 16px; border-bottom: 1px dashed var(--border); }
+  .thaw-box { background: var(--ice); border-radius: 10px; padding: 14px; }
+  .thaw-box .tomorrow-label { font-size: 12px; color: var(--accent); font-weight: 700; margin-bottom: 8px; }
+  .thaw-item { display: flex; align-items: center; font-size: 15px; padding: 6px 0; }
+  .thaw-item::before { content: "🧊➜🧊"; margin-right: 10px; font-size: 13px; }
+  .empty-note { font-size: 14px; color: var(--muted); font-style: italic; }
+
+  /* ---- Grocery tab ---- */
+  .progress-wrap { padding: 4px 0 14px 0; }
+  .progress-bar { height: 8px; background: var(--border); border-radius: 999px; overflow: hidden; }
+  .progress-fill { height: 100%; background: var(--accent); width: 0%; transition: width 0.25s ease; }
+  .progress-label { font-size: 12px; color: var(--muted); margin-top: 6px; display: flex; align-items: center; justify-content: space-between; }
+  .save-status { font-size: 11px; font-weight: 600; padding: 2px 9px; border-radius: 999px; }
+  .save-status.saved { background: #dcfce7; color: #15803d; }
+  .save-status.failed { background: #fee2e2; color: #b91c1c; }
+  .grocery-section { margin-bottom: 22px; }
+  .grocery-section-title { font-size: 14px; font-weight: 700; color: var(--accent); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 8px; }
+  .grocery-section-note { font-size: 12px; color: var(--muted); margin: -4px 0 8px 0; font-style: italic; }
+  ul.grocery-list { list-style: none; margin: 0; padding: 0; background: var(--card-bg); border-radius: 12px; overflow: hidden; border: 1px solid var(--border); }
+  ul.grocery-list li { display: flex; align-items: center; padding: 13px 14px; border-bottom: 1px solid var(--border); cursor: pointer; user-select: none; transition: background 0.15s ease; }
+  ul.grocery-list li:last-child { border-bottom: none; }
+  ul.grocery-list li:active { background: #f3f4f6; }
+  .box {
+    flex-shrink: 0; width: 24px; height: 24px; border-radius: 7px; border: 2px solid #d1d5db; margin-right: 12px;
+    display: flex; align-items: center; justify-content: center; transition: all 0.15s ease;
+  }
+  ul.grocery-list li.checked .box { background: var(--accent); border-color: var(--accent); }
+  .box svg { width: 14px; height: 14px; opacity: 0; transition: opacity 0.1s ease; }
+  ul.grocery-list li.checked .box svg { opacity: 1; }
+  .item-text { font-size: 15px; line-height: 1.35; }
+  ul.grocery-list li.checked .item-text { color: var(--muted); text-decoration: line-through; }
+  .reset-btn {
+    display: block; width: 100%; margin-top: 16px; background: none; border: none; color: var(--muted);
+    font-size: 13px; padding: 10px; cursor: pointer;
+  }
 </style>
 </head>
 <body>
-<div id="root"></div>
+
+<div class="tabbar">
+  <button class="tabbtn active" data-tab="mealplan">🍽️ Meal Plan</button>
+  <button class="tabbtn" data-tab="freezer">🧊 Freezer</button>
+  <button class="tabbtn" data-tab="grocery">🛒 Grocery</button>
+</div>
+
+<!-- ================= MEAL PLAN TAB ================= -->
+<div class="tabpanel active" id="tab-mealplan">
+  <h1 class="page-title">PSMF Meal Plan</h1>
+
+  <h2 class="section-title">Weekly Schedule</h2>
+  <table class="plan-table" id="scheduleTable">
+    <thead><tr><th>Day</th><th>Meal 1</th><th>Meal 2</th><th>Shake</th></tr></thead>
+    <tbody id="scheduleBody"></tbody>
+  </table>
+
+  <h2 class="section-title">Daily Macros</h2>
+  <table class="plan-table">
+    <thead><tr><th>Day</th><th class="num">Calories</th><th class="num">Protein</th><th class="num">Carbs</th><th class="num">Fat</th></tr></thead>
+    <tbody id="macrosBody"></tbody>
+  </table>
+</div>
+
+<!-- Recipe popout (shared across all meal-plan taps) -->
+<div class="overlay" id="overlay">
+  <div class="sheet">
+    <button class="close-btn" id="closeBtn">✕</button>
+    <div class="sheet-handle"></div>
+    <div id="sheetContent"></div>
+  </div>
+</div>
+
+<!-- ================= FREEZER TAB ================= -->
+<div class="tabpanel" id="tab-freezer">
+  <h1 class="page-title">🧊 Freezer Rotation Helper</h1>
+  <div class="subtitle">Tap today's day to see what to move to the fridge tonight</div>
+  <div class="day-grid" id="dayGrid"></div>
+  <div class="freezer-result" id="freezerResult"></div>
+</div>
+
+<!-- ================= GROCERY TAB ================= -->
+<div class="tabpanel" id="tab-grocery">
+  <h1 class="page-title">🛒 PSMF Grocery Checklist</h1>
+  <div class="subtitle">Tap an item to check it off — your progress is saved automatically.</div>
+  <div class="progress-wrap">
+    <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
+    <div class="progress-label">
+      <span id="progressLabel">0 of 0 checked</span>
+      <span class="save-status saved" id="saveStatus">✓ Saved</span>
+    </div>
+  </div>
+  <div id="groceryList"></div>
+  <button class="reset-btn" id="resetBtn">Reset all checkboxes</button>
+</div>
 
 <script>
-  window.storage = {
-    async get(key) {
-      try {
-        var raw = localStorage.getItem(key);
-        return raw === null ? null : { key: key, value: raw };
-      } catch (e) {
-        return null;
-      }
-    },
-    async set(key, value) {
-      try {
-        localStorage.setItem(key, value);
-        return { key: key, value: value };
-      } catch (e) {
-        return null;
-      }
-    },
-    async delete(key) {
-      try {
-        localStorage.removeItem(key);
-        return { key: key, deleted: true };
-      } catch (e) {
-        return null;
-      }
-    },
-    async list(prefix) {
-      try {
-        var keys = Object.keys(localStorage).filter(function (k) {
-          return !prefix || k.indexOf(prefix) === 0;
-        });
-        return { keys: keys };
-      } catch (e) {
-        return null;
-      }
-    },
-  };
-</script>
-
-<script type="text/plain" id="app-source">
-// Minimal inline icon set (Lucide-compatible paths) so this file has zero runtime
-// dependency on an icon package.
-function Icon({ children, className }) {
-  return (
-    <svg
-      xmlns="http://www.w3.org/2000/svg"
-      width="24"
-      height="24"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={className}
-    >
-      {children}
-    </svg>
-  );
-}
-
-const RefreshCw = (props) => (
-  <Icon {...props}>
-    <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" />
-    <path d="M21 3v5h-5" />
-    <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16" />
-    <path d="M8 16H3v5" />
-  </Icon>
-);
-
-const StickyNote = (props) => (
-  <Icon {...props}>
-    <path d="M21 9a2.4 2.4 0 0 0-.706-1.706l-3.588-3.588A2.4 2.4 0 0 0 15 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2z" />
-    <path d="M15 3v5a1 1 0 0 0 1 1h5" />
-  </Icon>
-);
-
-const HistoryIcon = (props) => (
-  <Icon {...props}>
-    <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
-    <path d="M3 3v5h5" />
-    <path d="M12 7v5l4 2" />
-  </Icon>
-);
-
-const Plus = (props) => (
-  <Icon {...props}>
-    <path d="M5 12h14" />
-    <path d="M12 5v14" />
-  </Icon>
-);
-
-const X = (props) => (
-  <Icon {...props}>
-    <path d="M18 6 6 18" />
-    <path d="m6 6 12 12" />
-  </Icon>
-);
-
-const Trash2 = (props) => (
-  <Icon {...props}>
-    <path d="M10 11v6" />
-    <path d="M14 11v6" />
-    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" />
-    <path d="M3 6h18" />
-    <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-  </Icon>
-);
-
-const Check = (props) => (
-  <Icon {...props}>
-    <path d="M20 6 9 17l-5-5" />
-  </Icon>
-);
-
-const Loader2 = (props) => (
-  <Icon {...props}>
-    <path d="M21 12a9 9 0 1 1-6.219-8.56" />
-  </Icon>
-);
-
-const Pencil = (props) => (
-  <Icon {...props}>
-    <path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z" />
-    <path d="m15 5 4 4" />
-  </Icon>
-);
-
-const CircleAlert = (props) => (
-  <Icon {...props}>
-    <circle cx="12" cy="12" r="10" />
-    <line x1="12" x2="12" y1="8" y2="12" />
-    <line x1="12" x2="12.01" y1="16" y2="16" />
-  </Icon>
-);
-
-const ArchiveIcon = (props) => (
-  <Icon {...props}>
-    <rect width="20" height="5" x="2" y="3" rx="1" />
-    <path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8" />
-    <path d="M10 12h4" />
-  </Icon>
-);
-
-const Undo2 = (props) => (
-  <Icon {...props}>
-    <path d="M9 14 4 9l5-5" />
-    <path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5a5.5 5.5 0 0 1-5.5 5.5H11" />
-  </Icon>
-);
-
-const LibraryIcon = (props) => (
-  <Icon {...props}>
-    <path d="m16 6 4 14" />
-    <path d="M12 6v14" />
-    <path d="M8 8v12" />
-    <path d="M4 4v16" />
-  </Icon>
-);
-
-const ListChecks = (props) => (
-  <Icon {...props}>
-    <path d="M13 5h8" />
-    <path d="M13 12h8" />
-    <path d="M13 19h8" />
-    <path d="m3 17 2 2 4-4" />
-    <path d="m3 7 2 2 4-4" />
-  </Icon>
-);
-
-const Trophy = (props) => (
-  <Icon {...props}>
-    <path d="M10 14.66V17a1 1 0 0 1-1 1 2 2 0 0 0-2 2v2" />
-    <path d="M14 14.66V17a1 1 0 0 0 1 1 2 2 0 0 1 2 2v2" />
-    <path d="M17.916 10H19.5A2.5 2.5 0 0 0 22 7.5V5a1 1 0 0 0-1-1h-3" />
-    <path d="M4 22h16" />
-    <path d="M6 9a6 6 0 0 0 12 0V3a1 1 0 0 0-1-1H7a1 1 0 0 0-1 1z" />
-    <path d="M6.084 10H4.5A2.5 2.5 0 0 1 2 7.5V5a1 1 0 0 1 1-1h3" />
-  </Icon>
-);
-
-const GripVertical = (props) => (
-  <Icon {...props}>
-    <circle cx="9" cy="12" r="1" />
-    <circle cx="9" cy="5" r="1" />
-    <circle cx="9" cy="19" r="1" />
-    <circle cx="15" cy="12" r="1" />
-    <circle cx="15" cy="5" r="1" />
-    <circle cx="15" cy="19" r="1" />
-  </Icon>
-);
-
-const ChevronDown = (props) => (
-  <Icon {...props}>
-    <path d="m6 9 6 6 6-6" />
-  </Icon>
-);
-
-const ChevronUp = (props) => (
-  <Icon {...props}>
-    <path d="m18 15-6-6-6 6" />
-  </Icon>
-);
-
-const Search = (props) => (
-  <Icon {...props}>
-    <path d="m21 21-4.34-4.34" />
-    <circle cx="11" cy="11" r="8" />
-  </Icon>
-);
-
-const Download = (props) => (
-  <Icon {...props}>
-    <path d="M12 15V3" />
-    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-    <path d="m7 10 5 5 5-5" />
-  </Icon>
-);
-
-const Upload = (props) => (
-  <Icon {...props}>
-    <path d="M12 3v12" />
-    <path d="m17 8-5-5-5 5" />
-    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-  </Icon>
-);
-const { useState, useEffect, useRef } = React;
-
-const STORAGE_KEY = 'exercise-tracker-data-v1';
-
-function genId(prefix) {
-  return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
-}
-
-// Returns a new array with the item at `from` moved to `to`.
-function moveItem(arr, from, to) {
-  if (from === to || from < 0 || to < 0 || from >= arr.length || to >= arr.length) return arr;
-  const copy = arr.slice();
-  const [item] = copy.splice(from, 1);
-  copy.splice(to, 0, item);
-  return copy;
-}
-
-function mkExercise(name) {
-  return {
-    id: genId('ex'),
-    name,
-    notes: '',
-    sets: [{ weight: '', reps: '' }],
-    history: [],
-  };
-}
-
-const STRETCH_HOLD_SECONDS = 30;
-
-function mkStretch(name) {
-  return {
-    id: genId('st'),
-    name,
-    notes: '',
-    sets: [{ completed: false }],
-    history: [],
-  };
-}
-
-const MUSCLE_GROUPS = [
-  'Chest', 'Back', 'Shoulders', 'Traps', 'Neck', 'Biceps', 'Triceps', 'Forearms', 'Quads', 'Hamstrings', 'Glutes', 'Core', 'Other',
-];
-
-// One distinct color per muscle group, reused for badges, borders, group chips, and dots.
-const GROUP_COLORS = {
-  Chest: { text: 'text-red-400', bg: 'bg-red-500/10', border: 'border-red-500/40', left: 'border-l-red-500', dot: 'bg-red-500' },
-  Back: { text: 'text-blue-400', bg: 'bg-blue-500/10', border: 'border-blue-500/40', left: 'border-l-blue-500', dot: 'bg-blue-500' },
-  Shoulders: { text: 'text-violet-400', bg: 'bg-violet-500/10', border: 'border-violet-500/40', left: 'border-l-violet-500', dot: 'bg-violet-500' },
-  Traps: { text: 'text-indigo-400', bg: 'bg-indigo-500/10', border: 'border-indigo-500/40', left: 'border-l-indigo-500', dot: 'bg-indigo-500' },
-  Neck: { text: 'text-rose-400', bg: 'bg-rose-500/10', border: 'border-rose-500/40', left: 'border-l-rose-500', dot: 'bg-rose-500' },
-  Biceps: { text: 'text-emerald-400', bg: 'bg-emerald-500/10', border: 'border-emerald-500/40', left: 'border-l-emerald-500', dot: 'bg-emerald-500' },
-  Triceps: { text: 'text-teal-400', bg: 'bg-teal-500/10', border: 'border-teal-500/40', left: 'border-l-teal-500', dot: 'bg-teal-500' },
-  Forearms: { text: 'text-lime-400', bg: 'bg-lime-500/10', border: 'border-lime-500/40', left: 'border-l-lime-500', dot: 'bg-lime-500' },
-  Quads: { text: 'text-orange-400', bg: 'bg-orange-500/10', border: 'border-orange-500/40', left: 'border-l-orange-500', dot: 'bg-orange-500' },
-  Hamstrings: { text: 'text-amber-400', bg: 'bg-amber-500/10', border: 'border-amber-500/40', left: 'border-l-amber-500', dot: 'bg-amber-500' },
-  Glutes: { text: 'text-pink-400', bg: 'bg-pink-500/10', border: 'border-pink-500/40', left: 'border-l-pink-500', dot: 'bg-pink-500' },
-  Core: { text: 'text-sky-400', bg: 'bg-sky-500/10', border: 'border-sky-500/40', left: 'border-l-sky-500', dot: 'bg-sky-500' },
-  Other: { text: 'text-stone-400', bg: 'bg-stone-500/10', border: 'border-stone-500/40', left: 'border-l-stone-500', dot: 'bg-stone-500' },
-};
-
-function groupColor(group) {
-  return GROUP_COLORS[group] || GROUP_COLORS.Other;
-}
-
-const BODY_AREAS = ['Neck', 'Shoulders', 'Chest', 'Back', 'Hips', 'Groin', 'Glutes', 'Hamstrings', 'Quads', 'Calves', 'Full Body', 'Skills', 'Other'];
-
-const AREA_COLORS = {
-  Neck: { text: 'text-rose-300', bg: 'bg-rose-400/10', border: 'border-rose-400/40', left: 'border-l-rose-400', dot: 'bg-rose-400' },
-  Shoulders: { text: 'text-fuchsia-300', bg: 'bg-fuchsia-400/10', border: 'border-fuchsia-400/40', left: 'border-l-fuchsia-400', dot: 'bg-fuchsia-400' },
-  Chest: { text: 'text-pink-300', bg: 'bg-pink-400/10', border: 'border-pink-400/40', left: 'border-l-pink-400', dot: 'bg-pink-400' },
-  Back: { text: 'text-indigo-300', bg: 'bg-indigo-400/10', border: 'border-indigo-400/40', left: 'border-l-indigo-400', dot: 'bg-indigo-400' },
-  Hips: { text: 'text-violet-300', bg: 'bg-violet-400/10', border: 'border-violet-400/40', left: 'border-l-violet-400', dot: 'bg-violet-400' },
-  Groin: { text: 'text-emerald-300', bg: 'bg-emerald-400/10', border: 'border-emerald-400/40', left: 'border-l-emerald-400', dot: 'bg-emerald-400' },
-  Glutes: { text: 'text-orange-300', bg: 'bg-orange-400/10', border: 'border-orange-400/40', left: 'border-l-orange-400', dot: 'bg-orange-400' },
-  Hamstrings: { text: 'text-purple-300', bg: 'bg-purple-400/10', border: 'border-purple-400/40', left: 'border-l-purple-400', dot: 'bg-purple-400' },
-  Quads: { text: 'text-blue-300', bg: 'bg-blue-400/10', border: 'border-blue-400/40', left: 'border-l-blue-400', dot: 'bg-blue-400' },
-  Calves: { text: 'text-sky-300', bg: 'bg-sky-400/10', border: 'border-sky-400/40', left: 'border-l-sky-400', dot: 'bg-sky-400' },
-  'Full Body': { text: 'text-teal-300', bg: 'bg-teal-400/10', border: 'border-teal-400/40', left: 'border-l-teal-400', dot: 'bg-teal-400' },
-  Skills: { text: 'text-amber-300', bg: 'bg-amber-400/10', border: 'border-amber-400/40', left: 'border-l-amber-400', dot: 'bg-amber-400' },
-  Other: { text: 'text-stone-400', bg: 'bg-stone-500/10', border: 'border-stone-500/40', left: 'border-l-stone-500', dot: 'bg-stone-500' },
-};
-
-function areaColor(area) {
-  return AREA_COLORS[area] || AREA_COLORS.Other;
-}
-
-function defaultData() {
-  const libraryNames = [
-    // Chest
-    ['Cable Flye', 'Chest'],
-    ['Dips', 'Chest'],
-    ['Dumbbell Flye', 'Chest'],
-    ['Flat Bench', 'Chest'],
-    ['Incline Bench', 'Chest'],
-    ['Incline Dumbbell Press', 'Chest'],
-    ['Incline Smith Machine', 'Chest'],
-    ['Pec Deck', 'Chest'],
-    // Back
-    ['Cable Row', 'Back'],
-    ['Chin-Up', 'Back'],
-    ['Dumbbell Pullover', 'Back'],
-    ['Hammer Machine Row (High)', 'Back'],
-    ['Hammer Machine Row (Low)', 'Back'],
-    ['Inverted Row', 'Back'],
-    ['Pull-Up (Neutral Grip)', 'Back'],
-    ['Pull-Up (Overhand Grip)', 'Back'],
-    // Shoulders
-    ['Behind-the-back Cable Lateral Raise (Cuff)', 'Shoulders'],
-    ['Dumbbell Lateral Raise', 'Shoulders'],
-    ['Dumbbell Lean-in Lateral Raise', 'Shoulders'],
-    ['FreeMotion Rear Delt Flye', 'Shoulders'],
-    ['Machine Lateral Raise', 'Shoulders'],
-    ['Seated Dumbbell Press', 'Shoulders'],
-    ['Seated OHP', 'Shoulders'],
-    ['Standing OHP', 'Shoulders'],
-    ['Upright Row', 'Shoulders'],
-    // Biceps
-    ['Bayesain Curl', 'Biceps'],
-    ['EZ-bar Preacher Curl', 'Biceps'],
-    ['Hammer Preacher Curl', 'Biceps'],
-    ['Incline Curl', 'Biceps'],
-    ['Machine Bicep Curl', 'Biceps'],
-    // Triceps
-    ['Barbell Skullcrusher', 'Triceps'],
-    ['Overhead Cable Tricep Extension', 'Triceps'],
-    ['Seated Overhead EZ-bar Tricep Extension', 'Triceps'],
-    ['Tricep Pushdown', 'Triceps'],
-    // Forearms
-    ['Cable Extensors', 'Forearms'],
-    ['Cable Flexors', 'Forearms'],
-    ['Deadhang', 'Forearms'],
-    ['Dumbbell Extensors', 'Forearms'],
-    ['Dumbbell Flexors', 'Forearms'],
-    ['Grip Crusher', 'Forearms'],
-    ['Single Arm Deadhang', 'Forearms'],
-    ['Weighted Stick Pronation + Supination', 'Forearms'],
-    ['Weighted Stick Radial Deviation', 'Forearms'],
-    ['Weighted Stick Ulnar Deviation', 'Forearms'],
-    // Quads
-    ['Quad Extension', 'Quads'],
-    ['Reverse Nordic', 'Quads'],
-    ['Sissy Squat', 'Quads'],
-    // Hamstrings
-    ['Jefferson Curl', 'Hamstrings'],
-    ['Lying Hamstring Curl', 'Hamstrings'],
-    ['Nordic Curl', 'Hamstrings'],
-    ['Seated Hamstring Curl', 'Hamstrings'],
-    // Glutes
-    ['Cossack Squat', 'Glutes'],
-    ['Pistol Squat', 'Glutes'],
-    ['Step-Up', 'Glutes'],
-    ['Zercher Squat', 'Glutes'],
-    // Core
-    ['Decline Sit-Up', 'Core'],
-    ['Dragon Flag', 'Core'],
-    ['Gar Hammer', 'Core'],
-    ['Hanging Leg Raise', 'Core'],
-  ];
-  const days = [
-    {
-      id: genId('day'),
-      name: 'Upper 1',
-      exercises: [
-        mkExercise('Incline Bench'),
-        mkExercise('Pull-Up (Neutral Grip)'),
-        mkExercise('Cable Flye'),
-        mkExercise('Hammer Machine Row (Low)'),
-        mkExercise('Behind-the-back Cable Lateral Raise (Cuff)'),
-      ],
-      archived: [],
-    },
-    {
-      id: genId('day'),
-      name: 'Legs',
-      exercises: [
-        mkExercise('Jefferson Curl'),
-        mkExercise('Cossack Squat'),
-        mkExercise('Sissy Squat'),
-        mkExercise('Decline Sit-Up'),
-      ],
-      archived: [],
-    },
-    {
-      id: genId('day'),
-      name: 'Upper 2',
-      exercises: [
-        mkExercise('Standing OHP'),
-        mkExercise('Chin-Up'),
-        mkExercise('Dips'),
-        mkExercise('Dumbbell Pullover'),
-        mkExercise('Dumbbell Lean-in Lateral Raise'),
-      ],
-      archived: [],
-    },
-    {
-      id: genId('day'),
-      name: 'Arms N Shii',
-      exercises: [
-        mkExercise('Incline Curl'),
-        mkExercise('Barbell Skullcrusher'),
-        mkExercise('Hammer Preacher Curl'),
-        mkExercise('Dragon Flag'),
-        mkExercise('Dumbbell Flexors'),
-        mkExercise('Dumbbell Extensors'),
-      ],
-      archived: [],
-    },
-    {
-      id: genId('day'),
-      name: 'Forearms',
-      exercises: [
-        mkExercise('Weighted Stick Pronation + Supination'),
-        mkExercise('Weighted Stick Ulnar Deviation'),
-        mkExercise('Weighted Stick Radial Deviation'),
-        mkExercise('Grip Crusher'),
-        mkExercise('Deadhang'),
-      ],
-      archived: [],
-    },
-  ];
-  return {
-    library: libraryNames.map(([name, muscleGroup]) => ({ id: genId('lib'), name, muscleGroup })),
-    days,
-    // The active program: cycle order (day ids) plus which exercise ids have been logged
-    // since the last time the cycle completed/reset. Forearms is excluded, matching the
-    // desktop program (Upper 1 / Legs / Upper 2 / Arms N Shii only).
-    program: { order: days.slice(0, 4).map((d) => d.id), loggedIds: [], skippedIds: [] },
-    sessionsCollapsed: false,
-    activeDayId: days[0]?.id ?? null,
-    ...defaultFlexData(),
-  };
-}
-
-function defaultFlexData() {
-  const flexLibraryNames = [
-    ['Doorway Stretch', 'Chest'],
-    ['90/90 Hip Stretch', 'Hips'],
-    ['Pigeon Stretch', 'Hips'],
-    ['Butterfly Stretch', 'Groin'],
-    ['Pancake Stretch', 'Hamstrings'],
-    ['Standing Hamstring Stretch', 'Hamstrings'],
-    ['Couch Stretch', 'Quads'],
-    ['Butchers Block', 'Skills'],
-    ['Middle Splits', 'Skills'],
-    ['Thoracic Extension', 'Skills'],
-  ];
-  const flexDays = [
-    {
-      id: genId('day'),
-      name: 'Middle Split',
-      exercises: [
-        mkStretch('Standing Hamstring Stretch'),
-        mkStretch('Butterfly Stretch'),
-        mkStretch('Pancake Stretch'),
-        mkStretch('Pigeon Stretch'),
-        mkStretch('Middle Splits'),
-      ],
-      archived: [],
-    },
-  ];
-  return {
-    flexLibrary: flexLibraryNames.map(([name, area]) => ({ id: genId('lib'), name, area })),
-    flexDays,
-    flexProgram: { order: flexDays.map((d) => d.id), loggedIds: [], skippedIds: [] },
-    flexSessionsCollapsed: false,
-    flexActiveDayId: flexDays[0]?.id ?? null,
-  };
-}
-
-// Fills in fields that may be missing from data saved by an earlier version of the app,
-// re-buckets any muscle group that no longer exists (e.g. the old 'Arms'/'Legs') into 'Other',
-// and drops any stale day ids from the active-program order (e.g. a deleted day).
-function normalize(parsed) {
-  const days = (parsed.days || []).map((d) => ({ ...d, archived: d.archived || [] }));
-  const dayIds = days.map((d) => d.id);
-  // Saves from before the program feature existed have no `program` field at all — for those,
-  // default the order to every current day (one-time migration). Once a program field exists,
-  // trust it as-is: a day missing from it was deliberately removed and should stay removed,
-  // not get silently re-added just because it still exists in `days`.
-  const savedOrder = parsed.program ? parsed.program.order || [] : dayIds;
-  const order = savedOrder.filter((id) => dayIds.includes(id));
-  const loggedIds = (parsed.program && parsed.program.loggedIds) || [];
-  const skippedIds = (parsed.program && parsed.program.skippedIds) || [];
-  const activeDayId = dayIds.includes(parsed.activeDayId) ? parsed.activeDayId : dayIds[0] ?? null;
-
-  // Flexibility side: if this save predates the feature entirely, seed it fresh rather than
-  // leaving it empty, same as a first-ever install would get.
-  const hasFlex = Array.isArray(parsed.flexDays);
-  const flexSeed = hasFlex ? null : defaultFlexData();
-  const flexDays = hasFlex ? parsed.flexDays.map((d) => ({ ...d, archived: d.archived || [] })) : flexSeed.flexDays;
-  const flexDayIds = flexDays.map((d) => d.id);
-  const flexSavedOrder = hasFlex ? (parsed.flexProgram ? parsed.flexProgram.order || [] : flexDayIds) : flexSeed.flexProgram.order;
-  const flexOrder = flexSavedOrder.filter((id) => flexDayIds.includes(id));
-  const flexLoggedIds = hasFlex ? (parsed.flexProgram && parsed.flexProgram.loggedIds) || [] : [];
-  const flexSkippedIds = hasFlex ? (parsed.flexProgram && parsed.flexProgram.skippedIds) || [] : [];
-  const flexActiveDayId = hasFlex
-    ? flexDayIds.includes(parsed.flexActiveDayId)
-      ? parsed.flexActiveDayId
-      : flexDayIds[0] ?? null
-    : flexSeed.flexActiveDayId;
-  const flexLibrary = hasFlex
-    ? (parsed.flexLibrary || []).map((l) => ({ ...l, area: BODY_AREAS.includes(l.area) ? l.area : 'Other' }))
-    : flexSeed.flexLibrary;
-
-  return {
-    library: (parsed.library || []).map((l) => ({
-      ...l,
-      muscleGroup: MUSCLE_GROUPS.includes(l.muscleGroup) ? l.muscleGroup : 'Other',
-    })),
-    days,
-    program: { order, loggedIds, skippedIds },
-    sessionsCollapsed: typeof parsed.sessionsCollapsed === 'boolean' ? parsed.sessionsCollapsed : false,
-    activeDayId,
-    flexLibrary,
-    flexDays,
-    flexProgram: { order: flexOrder, loggedIds: flexLoggedIds, skippedIds: flexSkippedIds },
-    flexSessionsCollapsed: typeof parsed.flexSessionsCollapsed === 'boolean' ? parsed.flexSessionsCollapsed : false,
-    flexActiveDayId,
-  };
-}
-
-// A day counts as "done" for the current cycle once every exercise in it has either been
-// logged or explicitly skipped.
-function dayIsComplete(day, loggedIds, skippedIds = []) {
-  return day.exercises.length > 0 && day.exercises.every((ex) => loggedIds.includes(ex.id) || skippedIds.includes(ex.id));
-}
-
-function meaningfulSets(sets) {
-  return sets.filter((s) => s.weight !== '' || s.reps !== '');
-}
-
-function setsEqual(a, b) {
-  if (a.length !== b.length) return false;
-  return a.every((s, i) => s.weight === b[i].weight && s.reps === b[i].reps);
-}
-
-function formatDate(iso) {
-  const d = new Date(iso);
-  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-}
-
-function summarizeSets(sets) {
-  return sets
-    .filter((s) => s.weight !== '' || s.reps !== '')
-    .map((s) => `${s.weight || '—'}×${s.reps || '—'}`)
-    .join(', ');
-}
-
-// Stretch equivalents: a "set" is just a completed hold, no weight/reps involved.
-function meaningfulStretchSets(sets) {
-  return sets.filter((s) => s.completed);
-}
-
-function stretchSetsEqual(a, b) {
-  if (a.length !== b.length) return false;
-  return a.every((s, i) => s.completed === b[i].completed);
-}
-
-function summarizeStretchSets(sets) {
-  const n = sets.filter((s) => s.completed).length;
-  if (!n) return '';
-  return `${n} × ${STRETCH_HOLD_SECONDS}s hold${n > 1 ? 's' : ''}`;
-}
-
-// Scans every day (active + archived) for logged sessions under this exact stretch name.
-function getStretchStats(days, name) {
-  const lower = name.toLowerCase();
-  let sessions = 0;
-  let lastDate = null;
-  let longestSession = 0; // most holds completed in a single logged session
-
-  const consider = (ex) => {
-    if (ex.name.toLowerCase() !== lower) return;
-    ex.history.forEach((h) => {
-      sessions += 1;
-      if (!lastDate || new Date(h.date) > new Date(lastDate)) lastDate = h.date;
-      const completedCount = h.sets.filter((s) => s.completed).length;
-      if (completedCount > longestSession) longestSession = completedCount;
-    });
-  };
-
-  days.forEach((d) => {
-    d.exercises.forEach(consider);
-    (d.archived || []).forEach(consider);
+/* ============================================================
+   TAB SWITCHING
+   ============================================================ */
+document.querySelectorAll(".tabbtn").forEach(btn => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll(".tabbtn").forEach(b => b.classList.remove("active"));
+    document.querySelectorAll(".tabpanel").forEach(p => p.classList.remove("active"));
+    btn.classList.add("active");
+    document.getElementById("tab-" + btn.dataset.tab).classList.add("active");
   });
-
-  return { sessions, lastDate, longestSession };
-}
-
-// Scans every day (active exercises + archived ones) for logged sets under this exact name
-// and pulls out the heaviest set and the best estimated 1-rep max (Epley formula).
-function getExerciseStats(days, name) {
-  const lower = name.toLowerCase();
-  let sessions = 0;
-  let lastDate = null;
-  let bestWeightSet = null;
-  let bestEst1RM = null;
-
-  const consider = (ex) => {
-    if (ex.name.toLowerCase() !== lower) return;
-    ex.history.forEach((h) => {
-      sessions += 1;
-      if (!lastDate || new Date(h.date) > new Date(lastDate)) lastDate = h.date;
-      h.sets.forEach((s) => {
-        const w = parseFloat(s.weight);
-        const r = parseFloat(s.reps);
-        if (!isNaN(w) && !isNaN(r) && r > 0) {
-          if (!bestWeightSet || w > bestWeightSet.weight || (w === bestWeightSet.weight && r > bestWeightSet.reps)) {
-            bestWeightSet = { weight: w, reps: r, date: h.date };
-          }
-          const est = w * (1 + r / 30);
-          if (!bestEst1RM || est > bestEst1RM.value) {
-            bestEst1RM = { value: est, weight: w, reps: r, date: h.date };
-          }
-        }
-      });
-    });
-  };
-
-  days.forEach((d) => {
-    d.exercises.forEach(consider);
-    (d.archived || []).forEach(consider);
-  });
-
-  return { sessions, lastDate, bestWeightSet, bestEst1RM };
-}
-
-// Finds every archived exercise (across all days) that matches this library name.
-function getArchivedMatches(days, name) {
-  const lower = name.toLowerCase();
-  const matches = [];
-  days.forEach((d) => {
-    (d.archived || []).forEach((ex) => {
-      if (ex.name.toLowerCase() === lower) matches.push({ dayId: d.id, dayName: d.name, ex });
-    });
-  });
-  return matches;
-}
-
-// Every logged session for this name, across every day slot and archived slot, newest first.
-// This is the shared timeline for an exercise name -- the same "Lateral Raise" logged on two
-// different days shows up as one merged history, wherever you view it from. Each entry is
-// tagged with which exercise instance actually owns it (ownerDayId/ownerExId), so it can still
-// be edited or deleted correctly regardless of which day's card you're looking at it from.
-function getFullHistory(days, name) {
-  const lower = name.toLowerCase();
-  const entries = [];
-  const consider = (dayId, ex) => {
-    if (ex.name.toLowerCase() !== lower) return;
-    ex.history.forEach((h) => entries.push({ ...h, ownerDayId: dayId, ownerExId: ex.id }));
-  };
-  days.forEach((d) => {
-    d.exercises.forEach((ex) => consider(d.id, ex));
-    (d.archived || []).forEach((ex) => consider(d.id, ex));
-  });
-  return entries.sort((a, b) => new Date(b.date) - new Date(a.date));
-}
-
-function ExerciseTracker() {
-  const [data, setData] = useState(null);
-  const [view, setView] = useState('log'); // 'log' | 'library' | 'flexLog' | 'flexLibrary'
-  const [loaded, setLoaded] = useState(false);
-  const [saveState, setSaveState] = useState('idle');
-  const [openNotes, setOpenNotes] = useState({}); // shared across both sections -- exercise/stretch ids never collide
-  const [openHistory, setOpenHistory] = useState({});
-  const [editingDayId, setEditingDayId] = useState(null);
-  const [editingDayName, setEditingDayName] = useState('');
-  const [addingExerciseFor, setAddingExerciseFor] = useState(null);
-  const [swapId, setSwapId] = useState(null);
-  const [addingDay, setAddingDay] = useState(false);
-  const [newDayName, setNewDayName] = useState('');
-  const [confirm, setConfirm] = useState(null); // { message, onConfirm } — replaces window.confirm, which sandboxed artifacts can silently block
-  // Tracks every exercise instance (`${dayId}:${exId}`) that was just logged and hasn't been
-  // touched since, so each one's footer button can independently show "Edit" -- purely based
-  // on the action taken, not by comparing field values (which could coincidentally match an
-  // old log, e.g. typing reps=1 when that's also what you logged last time). A Set (not a
-  // single value) so logging exercise B doesn't clear exercise A's still-valid "just logged"
-  // state.
-  const [justLoggedKeys, setJustLoggedKeys] = useState(() => new Set());
-  const markJustLogged = (dayId, exId) => {
-    const key = `${dayId}:${exId}`;
-    setJustLoggedKeys((prev) => {
-      const next = new Set(prev);
-      next.add(key);
-      return next;
-    });
-  };
-  const clearJustLogged = (dayId, exId) => {
-    const key = `${dayId}:${exId}`;
-    setJustLoggedKeys((prev) => {
-      if (!prev.has(key)) return prev;
-      const next = new Set(prev);
-      next.delete(key);
-      return next;
-    });
-  };
-  const [prName, setPrName] = useState(null); // exercise name currently shown in the PR modal
-  const [draggingExerciseId, setDraggingExerciseId] = useState(null);
-  const [draggingDayId, setDraggingDayId] = useState(null);
-  const [draggingProgramId, setDraggingProgramId] = useState(null);
-  const [reorderMode, setReorderMode] = useState(false); // explicit toggle: only in this mode do Sessions/Active Program show drag handles
-  const [programDropHover, setProgramDropHover] = useState(false); // true while dragging a Sessions tab over the Active Program row
-  const [toast, setToast] = useState(null); // { message, tone: 'success' | 'error' }
-  const exerciseListRef = useRef(null);
-  const exerciseDragState = useRef(null);
-  const dayTabsRef = useRef(null);
-  const dayDragState = useRef(null);
-  const justDraggedDayRef = useRef(false); // suppresses the tab's click-to-select right after a drag
-  const programListRef = useRef(null);
-  const programDragState = useRef(null);
-  const justDraggedProgramRef = useRef(false); // suppresses the program chip's click-to-select right after a drag
-  const saveTimeout = useRef(null);
-
-  // --- Flexibility side: its own day list, program, and drag state, kept separate from the
-  // strength side above since they have their own Sessions row / Active Program row (their
-  // own DOM containers to query for drag positions). Notes/history toggles, the confirm/toast
-  // system, and swap/add-exercise/day-edit forms are shared -- ids never collide between the
-  // two sections, and only one section's UI is visible at a time anyway.
-  const [editingFlexDayId, setEditingFlexDayId] = useState(null);
-  const [editingFlexDayName, setEditingFlexDayName] = useState('');
-  const [addingFlexExerciseFor, setAddingFlexExerciseFor] = useState(null);
-  const [flexSwapId, setFlexSwapId] = useState(null);
-  const [addingFlexDay, setAddingFlexDay] = useState(false);
-  const [newFlexDayName, setNewFlexDayName] = useState('');
-  const [flexPrName, setFlexPrName] = useState(null);
-  const [draggingFlexExerciseId, setDraggingFlexExerciseId] = useState(null);
-  const [draggingFlexDayId, setDraggingFlexDayId] = useState(null);
-  const [draggingFlexProgramId, setDraggingFlexProgramId] = useState(null);
-  const [flexProgramDropHover, setFlexProgramDropHover] = useState(false);
-  const [flexReorderMode, setFlexReorderMode] = useState(false);
-  const [activeTimers, setActiveTimers] = useState({}); // key: `${exId}:${setIdx}` -> seconds remaining
-  const flexExerciseListRef = useRef(null);
-  const flexExerciseDragState = useRef(null);
-  const flexDayTabsRef = useRef(null);
-  const flexDayDragState = useRef(null);
-  const flexJustDraggedDayRef = useRef(false);
-  const flexProgramListRef = useRef(null);
-  const flexProgramDragState = useRef(null);
-  const flexJustDraggedProgramRef = useRef(false);
-
-
-  const askConfirm = (message, onConfirm, confirmLabel = 'Delete') => setConfirm({ message, onConfirm, confirmLabel });
-
-  const showToast = (message, tone = 'success') => {
-    setToast({ message, tone });
-    setTimeout(() => setToast((t) => (t && t.message === message ? null : t)), 3000);
-  };
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const result = await window.storage.get(STORAGE_KEY, false);
-        if (cancelled) return;
-        if (result && result.value) {
-          setData(normalize(JSON.parse(result.value)));
-        } else {
-          setData(defaultData());
-        }
-      } catch (e) {
-        setData(defaultData());
-      } finally {
-        if (!cancelled) setLoaded(true);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!loaded || !data) return;
-    setSaveState('saving');
-    if (saveTimeout.current) clearTimeout(saveTimeout.current);
-    saveTimeout.current = setTimeout(async () => {
-      try {
-        const result = await window.storage.set(STORAGE_KEY, JSON.stringify(data), false);
-        setSaveState(result ? 'saved' : 'error');
-      } catch (e) {
-        setSaveState('error');
-      }
-    }, 600);
-    return () => clearTimeout(saveTimeout.current);
-  }, [data, loaded]);
-
-  // Safety net: guarantees drag highlighting (exercise cards, Sessions tabs, Active Program
-  // chips) always clears on release, even in the rare case a specific element's own
-  // pointerup/pointercancel doesn't fire (e.g. pointer capture lost mid-drag on some mobile
-  // browsers). Runs after the element-level handlers, so it never interferes with them --
-  // it only ever resets things that should already be null/false.
-  useEffect(() => {
-    const clearAllDragState = () => {
-      exerciseDragState.current = null;
-      setDraggingExerciseId(null);
-      if (dayDragState.current) clearTimeout(dayDragState.current.timer);
-      dayDragState.current = null;
-      setDraggingDayId(null);
-      if (programDragState.current) clearTimeout(programDragState.current.timer);
-      programDragState.current = null;
-      setDraggingProgramId(null);
-      setProgramDropHover(false);
-
-      flexExerciseDragState.current = null;
-      setDraggingFlexExerciseId(null);
-      if (flexDayDragState.current) clearTimeout(flexDayDragState.current.timer);
-      flexDayDragState.current = null;
-      setDraggingFlexDayId(null);
-      if (flexProgramDragState.current) clearTimeout(flexProgramDragState.current.timer);
-      flexProgramDragState.current = null;
-      setDraggingFlexProgramId(null);
-      setFlexProgramDropHover(false);
-    };
-    window.addEventListener('pointerup', clearAllDragState);
-    window.addEventListener('pointercancel', clearAllDragState);
-    return () => {
-      window.removeEventListener('pointerup', clearAllDragState);
-      window.removeEventListener('pointercancel', clearAllDragState);
-    };
-  }, []);
-
-  const PRE_COUNTDOWN_SECONDS = 3;
-
-  // Ticks every active stretch timer down once a second. Each timer has two phases: a brief
-  // "get ready" countdown, then the actual hold -- when the hold phase hits zero, it
-  // auto-marks that set complete and clears itself out. Timers are purely ephemeral UI state
-  // -- they don't survive a reload, same as any in-progress (unsaved) rest timer wouldn't.
-  useEffect(() => {
-    if (Object.keys(activeTimers).length === 0) return;
-    const interval = setInterval(() => {
-      setActiveTimers((prev) => {
-        const next = { ...prev };
-        Object.entries(prev).forEach(([key, timer]) => {
-          if (timer.phase === 'countdown') {
-            if (timer.secondsLeft <= 1) {
-              next[key] = { phase: 'hold', secondsLeft: STRETCH_HOLD_SECONDS };
-            } else {
-              next[key] = { ...timer, secondsLeft: timer.secondsLeft - 1 };
-            }
-            return;
-          }
-          // phase === 'hold'
-          if (timer.secondsLeft <= 1) {
-            delete next[key];
-            const [dayId, exId, idxStr] = key.split(':');
-            const idx = Number(idxStr);
-            clearJustLogged(dayId, exId);
-            setData((prevData) => ({
-              ...prevData,
-              flexDays: prevData.flexDays.map((d) =>
-                d.id !== dayId
-                  ? d
-                  : {
-                      ...d,
-                      exercises: d.exercises.map((ex) =>
-                        ex.id !== exId
-                          ? ex
-                          : { ...ex, sets: ex.sets.map((s, i) => (i === idx ? { ...s, completed: true } : s)) }
-                      ),
-                    }
-              ),
-            }));
-          } else {
-            next[key] = { ...timer, secondsLeft: timer.secondsLeft - 1 };
-          }
-        });
-        return next;
-      });
-    }, 1000);
-    return () => clearInterval(interval);
-  }, [activeTimers]);
-
-  if (!loaded || !data) {
-    return (
-      <div className="min-h-screen bg-stone-950 flex items-center justify-center">
-        <div className="flex items-center gap-2 text-stone-400">
-          <Loader2 className="w-5 h-5 animate-spin" />
-          <span className="text-sm">Loading your log…</span>
-        </div>
-      </div>
-    );
-  }
-
-  const activeDay = data.days.find((d) => d.id === data.activeDayId) || data.days[0];
-
-  const setActiveDayId = (id) => setData((prev) => ({ ...prev, activeDayId: id }));
-
-  // Jumps to whatever day comes after this one in the active program's rotation, wrapping
-  // back to the first day if this was the last one (which also lines up with the cycle
-  // having just reset, since completing the last day always completes the whole cycle too).
-  const advanceToNextDay = (dayId) => {
-    const idx = data.program.order.indexOf(dayId);
-    if (idx === -1) return;
-    const nextId = data.program.order[(idx + 1) % data.program.order.length];
-    setActiveDayId(nextId);
-  };
-
-  const groupForName = (name) => {
-    const match = data.library.find((l) => l.name.toLowerCase() === name.toLowerCase());
-    return match?.muscleGroup || 'Other';
-  };
-
-  // --- Flexibility side equivalents ---
-  const activeFlexDay = data.flexDays.find((d) => d.id === data.flexActiveDayId) || data.flexDays[0];
-
-  const setActiveFlexDayId = (id) => setData((prev) => ({ ...prev, flexActiveDayId: id }));
-
-  const advanceToNextFlexDay = (dayId) => {
-    const idx = data.flexProgram.order.indexOf(dayId);
-    if (idx === -1) return;
-    const nextId = data.flexProgram.order[(idx + 1) % data.flexProgram.order.length];
-    setActiveFlexDayId(nextId);
-  };
-
-  const areaForName = (name) => {
-    const match = data.flexLibrary.find((l) => l.name.toLowerCase() === name.toLowerCase());
-    return match?.area || 'Other';
-  };
-
-  // Begins a brief "get ready" countdown for one specific set; once that reaches zero the
-  // ticking effect above switches it into the actual 30s hold, then auto-completes it.
-  const startTimer = (dayId, exId, idx) => {
-    setActiveTimers((prev) => ({
-      ...prev,
-      [`${dayId}:${exId}:${idx}`]: { phase: 'countdown', secondsLeft: PRE_COUNTDOWN_SECONDS },
-    }));
-  };
-
-  const cancelTimer = (dayId, exId, idx) => {
-    setActiveTimers((prev) => {
-      const next = { ...prev };
-      delete next[`${dayId}:${exId}:${idx}`];
-      return next;
-    });
-  };
-
-  const updateFlexExercise = (dayId, exId, fn) => {
-    setData((prev) => ({
-      ...prev,
-      flexDays: prev.flexDays.map((d) =>
-        d.id !== dayId ? d : { ...d, exercises: d.exercises.map((ex) => (ex.id === exId ? fn(ex) : ex)) }
-      ),
-    }));
-  };
-
-  // Manual tap-to-complete/uncomplete -- the alternative to running the timer to completion.
-  const toggleFlexSetComplete = (dayId, exId, idx) => {
-    cancelTimer(dayId, exId, idx);
-    clearJustLogged(dayId, exId);
-    updateFlexExercise(dayId, exId, (ex) => ({
-      ...ex,
-      sets: ex.sets.map((s, i) => (i === idx ? { ...s, completed: !s.completed } : s)),
-    }));
-  };
-
-  const updateDay = (dayId, fn) => {
-    setData((prev) => ({
-      ...prev,
-      days: prev.days.map((d) => (d.id === dayId ? fn(d) : d)),
-    }));
-  };
-
-  const reorderExercises = (dayId, fromIndex, toIndex) => {
-    updateDay(dayId, (d) => ({ ...d, exercises: moveItem(d.exercises, fromIndex, toIndex) }));
-  };
-
-  const reorderDays = (fromIndex, toIndex) => {
-    setData((prev) => ({ ...prev, days: moveItem(prev.days, fromIndex, toIndex) }));
-  };
-
-  // Drag-to-reorder for exercises within the active day. The handle captures the pointer on
-  // press, so move/up events keep firing on it even as the finger/cursor travels elsewhere.
-  const handleExercisePointerDown = (id) => (e) => {
-    e.preventDefault();
-    exerciseDragState.current = { id };
-    setDraggingExerciseId(id);
-    try {
-      e.currentTarget.setPointerCapture(e.pointerId);
-    } catch (_) {}
-  };
-
-  const handleExercisePointerMove = (e) => {
-    const st = exerciseDragState.current;
-    if (!st || !exerciseListRef.current || !activeDay) return;
-    const els = Array.from(exerciseListRef.current.querySelectorAll('[data-sort-id]'));
-    const currentIndex = activeDay.exercises.findIndex((ex) => ex.id === st.id);
-    if (currentIndex === -1) return;
-    let targetIndex = els.length - 1;
-    for (let i = 0; i < els.length; i++) {
-      const rect = els[i].getBoundingClientRect();
-      if (e.clientY < rect.top + rect.height / 2) {
-        targetIndex = i;
-        break;
-      }
-    }
-    if (targetIndex !== currentIndex) reorderExercises(activeDay.id, currentIndex, targetIndex);
-  };
-
-  const handleExercisePointerUp = () => {
-    exerciseDragState.current = null;
-    setDraggingExerciseId(null);
-  };
-
-  // Drag-to-reorder for day tabs. Only active on the dedicated grip handle shown in reorder
-  // mode -- since that handle is a separate element from the tap-to-select button, there's no
-  // ambiguity to guess at: normal taps and scrolling are completely unaffected everywhere else,
-  // and dragging the handle always means "reorder" (or, over the Active Program row, "add to
-  // program"). The row's own scrolling is also hard-locked while a drag is in progress (via the
-  // overflow-x class toggled by draggingDayId in the render below).
-  const handleDayPointerDown = (id) => (e) => {
-    e.preventDefault();
-    dayDragState.current = { id };
-    setDraggingDayId(id);
-    try {
-      e.currentTarget.setPointerCapture(e.pointerId);
-    } catch (_) {}
-  };
-
-  const handleDayPointerMove = (e) => {
-    const st = dayDragState.current;
-    if (!st) return;
-    if (e.cancelable) e.preventDefault();
-
-    // Dragging a session down over the Active Program row is a "drop to add" gesture —
-    // don't also try to reorder the Sessions tabs while doing that. Generous padding so this
-    // doesn't need pixel-perfect precision.
-    if (programListRef.current) {
-      const rect = programListRef.current.getBoundingClientRect();
-      const pad = 24;
-      const overProgram = e.clientY >= rect.top - pad && e.clientY <= rect.bottom + pad;
-      if (overProgram) {
-        setProgramDropHover(true);
-        return;
-      }
-      if (programDropHover) setProgramDropHover(false);
-    }
-
-    if (!dayTabsRef.current) return;
-    const els = Array.from(dayTabsRef.current.querySelectorAll('[data-sort-id]'));
-    const currentIndex = data.days.findIndex((d) => d.id === st.id);
-    if (currentIndex === -1) return;
-    let targetIndex = els.length - 1;
-    for (let i = 0; i < els.length; i++) {
-      const rect = els[i].getBoundingClientRect();
-      if (e.clientX < rect.left + rect.width / 2) {
-        targetIndex = i;
-        break;
-      }
-    }
-    if (targetIndex !== currentIndex) {
-      reorderDays(currentIndex, targetIndex);
-    }
-  };
-
-  const handleDayPointerUp = (e) => {
-    const st = dayDragState.current;
-    // Decide the drop using the release position itself, with generous padding, since people
-    // naturally drift their finger a little as they lift it right at the moment of release.
-    if (st && programListRef.current && e) {
-      const rect = programListRef.current.getBoundingClientRect();
-      const pad = 24;
-      const overProgram = e.clientY >= rect.top - pad && e.clientY <= rect.bottom + pad;
-      if (overProgram) addToProgram(st.id);
-    }
-    setProgramDropHover(false);
-    dayDragState.current = null;
-    setDraggingDayId(null);
-  };
-
-  // Removing here only changes the program's rotation membership — the day itself,
-  // its exercises, and its history are untouched.
-  const removeFromProgram = (dayId, dayName) => {
-    askConfirm(
-      `Remove "${dayName}" from the active program? You can drag it back in from Sessions anytime.`,
-      () => {
-        setData((prev) => ({ ...prev, program: { ...prev.program, order: prev.program.order.filter((id) => id !== dayId) } }));
-      },
-      'Remove'
-    );
-  };
-
-  // Adding here only happens by dragging a day down from the Sessions row above (via its
-  // reorder-mode handle) — see handleDayPointerUp.
-  const addToProgram = (dayId) => {
-    setData((prev) =>
-      prev.program.order.includes(dayId)
-        ? prev
-        : { ...prev, program: { ...prev.program, order: [...prev.program.order, dayId] } }
-    );
-  };
-
-  // Same immediate-drag pattern for the Active Program row's own handle.
-  const handleProgramPointerDown = (id) => (e) => {
-    e.preventDefault();
-    programDragState.current = { id };
-    setDraggingProgramId(id);
-    try {
-      e.currentTarget.setPointerCapture(e.pointerId);
-    } catch (_) {}
-  };
-
-  const handleProgramPointerMove = (e) => {
-    const st = programDragState.current;
-    if (!st) return;
-    if (e.cancelable) e.preventDefault();
-    if (!programListRef.current) return;
-    const els = Array.from(programListRef.current.querySelectorAll('[data-sort-id]'));
-    const currentIndex = data.program.order.findIndex((id) => id === st.id);
-    if (currentIndex === -1) return;
-    let targetIndex = els.length - 1;
-    for (let i = 0; i < els.length; i++) {
-      const rect = els[i].getBoundingClientRect();
-      if (e.clientX < rect.left + rect.width / 2) {
-        targetIndex = i;
-        break;
-      }
-    }
-    if (targetIndex !== currentIndex) {
-      setData((prev) => ({ ...prev, program: { ...prev.program, order: moveItem(prev.program.order, currentIndex, targetIndex) } }));
-    }
-  };
-
-  const handleProgramPointerUp = () => {
-    programDragState.current = null;
-    setDraggingProgramId(null);
-  };
-
-  const handleResetCycle = () => {
-    askConfirm(
-      "Reset the current cycle? This clears completion marks — your logged history stays intact.",
-      () => setData((prev) => ({ ...prev, program: { ...prev.program, loggedIds: [] } })),
-      'Reset'
-    );
-  };
-
-  const updateExercise = (dayId, exId, fn) => {
-    updateDay(dayId, (d) => ({
-      ...d,
-      exercises: d.exercises.map((ex) => (ex.id === exId ? fn(ex) : ex)),
-    }));
-  };
-
-  const addToLibrary = (name, muscleGroup = 'Other') => {
-    const trimmed = name.trim();
-    if (!trimmed) return;
-    setData((prev) => {
-      const exists = prev.library.some((l) => l.name.toLowerCase() === trimmed.toLowerCase());
-      if (exists) return prev;
-      return { ...prev, library: [...prev.library, { id: genId('lib'), name: trimmed, muscleGroup }] };
-    });
-  };
-
-  const removeFromLibrary = (id, name) => {
-    askConfirm(`Remove "${name}" from your library? Any logs already recorded under that name stay untouched.`, () => {
-      setData((prev) => ({ ...prev, library: prev.library.filter((l) => l.id !== id) }));
-    });
-  };
-
-  const updateLibraryGroup = (id, muscleGroup) => {
-    setData((prev) => ({ ...prev, library: prev.library.map((l) => (l.id === id ? { ...l, muscleGroup } : l)) }));
-  };
-
-  const exportData = () => {
-    try {
-      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `gainz-gizmo-backup-${new Date().toISOString().slice(0, 10)}.json`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-      showToast('Backup downloaded');
-    } catch (e) {
-      showToast("Couldn't create the backup file", 'error');
-    }
-  };
-
-  // Called by LibraryView once it's read and JSON.parsed the chosen file itself.
-  const importData = (parsed) => {
-    let normalized;
-    try {
-      normalized = normalize(parsed);
-    } catch (e) {
-      showToast("That file doesn't look like a valid backup", 'error');
-      return;
-    }
-    askConfirm(
-      'Replace all current sessions, library, and program with this backup? This can\'t be undone.',
-      () => {
-        setData(normalized);
-        showToast('Data restored from backup');
-      },
-      'Replace'
-    );
-  };
-
-  const addSet = (dayId, exId) => {
-    clearJustLogged(dayId, exId);
-    updateExercise(dayId, exId, (ex) => ({ ...ex, sets: [...ex.sets, { weight: '', reps: '' }] }));
-  };
-
-  const removeSet = (dayId, exId, idx) => {
-    clearJustLogged(dayId, exId);
-    updateExercise(dayId, exId, (ex) => {
-      if (ex.sets.length <= 1) return { ...ex, sets: [{ weight: '', reps: '' }] };
-      return { ...ex, sets: ex.sets.filter((_, i) => i !== idx) };
-    });
-  };
-
-  const updateSetField = (dayId, exId, idx, field, value) => {
-    clearJustLogged(dayId, exId);
-    updateExercise(dayId, exId, (ex) => ({
-      ...ex,
-      sets: ex.sets.map((s, i) => (i === idx ? { ...s, [field]: value } : s)),
-    }));
-  };
-
-  const logSession = (dayId, exId) => {
-    const day = data.days.find((d) => d.id === dayId);
-    const ex = day?.exercises.find((e) => e.id === exId);
-    if (!ex) return;
-    const meaningful = meaningfulSets(ex.sets);
-    if (!meaningful.length) return;
-
-    const updatedEx = {
-      ...ex,
-      history: [{ id: genId('log'), date: new Date().toISOString(), sets: meaningful }, ...ex.history],
-    };
-    const updatedDays = data.days.map((d) =>
-      d.id === dayId ? { ...d, exercises: d.exercises.map((e) => (e.id === exId ? updatedEx : e)) } : d
-    );
-    const loggedIds = data.program.loggedIds.includes(exId) ? data.program.loggedIds : [...data.program.loggedIds, exId];
-    const cycleComplete =
-      data.program.order.length > 0 &&
-      data.program.order.every((id) => {
-        const d = updatedDays.find((dd) => dd.id === id);
-        return d && dayIsComplete(d, loggedIds, data.program.skippedIds);
-      });
-
-    setData((prev) => {
-      let days = prev.days.map((d) =>
-        d.id === dayId ? { ...d, exercises: d.exercises.map((e) => (e.id === exId ? updatedEx : e)) } : d
-      );
-      if (cycleComplete) {
-        // Blank every exercise's input fields across the whole program for the new round --
-        // history stays put (that's what feeds the "last time" hint), only the live fields
-        // reset. Keep however many set rows each exercise already had; only clear their values.
-        days = days.map((d) =>
-          prev.program.order.includes(d.id)
-            ? { ...d, exercises: d.exercises.map((e) => ({ ...e, sets: e.sets.map(() => ({ weight: '', reps: '' })) })) }
-            : d
-        );
-      }
-      return {
-        ...prev,
-        days,
-        program: { ...prev.program, loggedIds: cycleComplete ? [] : loggedIds, skippedIds: cycleComplete ? [] : prev.program.skippedIds },
-      };
-    });
-
-    if (cycleComplete) {
-      setJustLoggedKeys(new Set()); // every exercise's fields just got blanked for the new round too
-      showToast('Program cycle complete — reset for the next round');
-    } else {
-      markJustLogged(dayId, exId);
-    }
-  };
-
-  // Marks an exercise as intentionally skipped for this cycle (no data recorded), so the day
-  // and program can still be considered complete without pretending it was actually done.
-  const skipExercise = (dayId, exId) => {
-    if (data.program.skippedIds.includes(exId)) {
-      // Already skipped -- tapping again undoes it.
-      setData((prev) => ({ ...prev, program: { ...prev.program, skippedIds: prev.program.skippedIds.filter((id) => id !== exId) } }));
-      return;
-    }
-
-    const skippedIds = [...data.program.skippedIds, exId];
-    const cycleComplete =
-      data.program.order.length > 0 &&
-      data.program.order.every((id) => {
-        const d = data.days.find((dd) => dd.id === id);
-        return d && dayIsComplete(d, data.program.loggedIds, skippedIds);
-      });
-
-    setData((prev) => {
-      let days = prev.days;
-      if (cycleComplete) {
-        days = prev.days.map((d) =>
-          prev.program.order.includes(d.id)
-            ? { ...d, exercises: d.exercises.map((e) => ({ ...e, sets: e.sets.map(() => ({ weight: '', reps: '' })) })) }
-            : d
-        );
-      }
-      return {
-        ...prev,
-        days,
-        program: {
-          ...prev.program,
-          loggedIds: cycleComplete ? [] : prev.program.loggedIds,
-          skippedIds: cycleComplete ? [] : skippedIds,
-        },
-      };
-    });
-
-    if (cycleComplete) {
-      setJustLoggedKeys(new Set());
-      showToast('Program cycle complete — reset for the next round');
-    }
-  };
-
-  // Pulls a logged entry back into the editable set fields, so a mis-typed log can be
-  // corrected instead of living in history forever. Works for any entry, not just the most
-  // recent -- editing re-saves with today's date when you press "Log session" again, it
-  // doesn't preserve the original entry's date. Since history is shared across every day
-  // that has an exercise with this same name, the entry being edited might actually live on
-  // a *different* day than the one you're viewing -- targetDayId/targetExId is the card
-  // you're looking at (where the values land); ownerDayId/ownerExId is wherever the entry
-  // itself is actually stored (where it gets removed from).
-  const editHistoryEntry = (targetDayId, targetExId, ownerDayId, ownerExId, entryId) => {
-    const ownerDay = data.days.find((d) => d.id === ownerDayId);
-    const ownerEx = ownerDay?.exercises.find((e) => e.id === ownerExId);
-    const entry = ownerEx?.history.find((h) => h.id === entryId);
-    if (!entry) return;
-    const newSets = entry.sets.length ? entry.sets.map((s) => ({ weight: s.weight, reps: s.reps })) : [{ weight: '', reps: '' }];
-    clearJustLogged(targetDayId, targetExId);
-
-    setData((prev) => ({
-      ...prev,
-      days: prev.days.map((d) => {
-        let day = d;
-        if (day.id === ownerDayId) {
-          day = {
-            ...day,
-            exercises: day.exercises.map((e) => (e.id === ownerExId ? { ...e, history: e.history.filter((h) => h.id !== entryId) } : e)),
-          };
-        }
-        if (day.id === targetDayId) {
-          day = { ...day, exercises: day.exercises.map((e) => (e.id === targetExId ? { ...e, sets: newSets } : e)) };
-        }
-        return day;
-      }),
-    }));
-  };
-
-  const deleteHistoryEntry = (dayId, exId, entryId, dateLabel) => {
-    askConfirm(`Delete the log from ${dateLabel}? This can't be undone.`, () => {
-      updateExercise(dayId, exId, (ex) => ({ ...ex, history: ex.history.filter((h) => h.id !== entryId) }));
-    });
-  };
-
-  const clearSets = (dayId, exId) => {
-    clearJustLogged(dayId, exId);
-    updateExercise(dayId, exId, (ex) => ({ ...ex, sets: [{ weight: '', reps: '' }] }));
-  };
-
-  const updateNotes = (dayId, exId, text) => {
-    updateExercise(dayId, exId, (ex) => ({ ...ex, notes: text }));
-  };
-
-  const toggleNotes = (exId) => setOpenNotes((p) => ({ ...p, [exId]: !p[exId] }));
-  const toggleHistory = (exId) => setOpenHistory((p) => ({ ...p, [exId]: !p[exId] }));
-
-  // Swapping moves the current exercise (with its full history) into the day's archive
-  // and drops a fresh exercise into the same slot.
-  const archiveAndSwap = (dayId, exId, newName) => {
-    updateDay(dayId, (d) => {
-      const idx = d.exercises.findIndex((e) => e.id === exId);
-      if (idx === -1) return d;
-      const old = d.exercises[idx];
-      const fresh = mkExercise(newName);
-      const exercises = [...d.exercises];
-      exercises[idx] = fresh;
-      return { ...d, exercises, archived: [old, ...(d.archived || [])] };
-    });
-  };
-
-  const restoreExercise = (dayId, archivedId) => {
-    updateDay(dayId, (d) => {
-      const archived = d.archived || [];
-      const idx = archived.findIndex((e) => e.id === archivedId);
-      if (idx === -1) return d;
-      const ex = archived[idx];
-      return { ...d, exercises: [...d.exercises, ex], archived: archived.filter((e) => e.id !== archivedId) };
-    });
-  };
-
-  const deleteArchived = (dayId, archivedId, name) => {
-    askConfirm(`Permanently delete archived "${name}"? This can't be undone.`, () => {
-      updateDay(dayId, (d) => ({ ...d, archived: (d.archived || []).filter((e) => e.id !== archivedId) }));
-    });
-  };
-
-  const archiveExercise = (dayId, exId) => {
-    updateDay(dayId, (d) => {
-      const idx = d.exercises.findIndex((e) => e.id === exId);
-      if (idx === -1) return d;
-      const ex = d.exercises[idx];
-      return { ...d, exercises: d.exercises.filter((e) => e.id !== exId), archived: [ex, ...(d.archived || [])] };
-    });
-  };
-
-  const deleteExercise = (dayId, exId, name) => {
-    askConfirm(
-      `Archive "${name}"? You'll find it under this exercise in the Library tab, and can restore it anytime.`,
-      () => archiveExercise(dayId, exId),
-      'Archive'
-    );
-  };
-
-  const addExercise = (dayId, name) => {
-    updateDay(dayId, (d) => ({ ...d, exercises: [...d.exercises, mkExercise(name)] }));
-    setAddingExerciseFor(null);
-  };
-
-  const addDay = () => {
-    const name = newDayName.trim();
-    if (!name) return;
-    const id = genId('day');
-    setData((prev) => ({
-      ...prev,
-      days: [...prev.days, { id, name, exercises: [], archived: [] }],
-      program: { ...prev.program, order: [...prev.program.order, id] },
-    }));
-    setActiveDayId(id);
-    setNewDayName('');
-    setAddingDay(false);
-  };
-
-  const startRenameDay = (dayId, currentName) => {
-    setEditingDayId(dayId);
-    setEditingDayName(currentName);
-  };
-
-  const confirmRenameDay = (dayId) => {
-    const name = editingDayName.trim();
-    if (name) {
-      setData((prev) => ({ ...prev, days: prev.days.map((d) => (d.id === dayId ? { ...d, name } : d)) }));
-    }
-    setEditingDayId(null);
-  };
-
-  const deleteDay = (dayId, name) => {
-    if (data.days.length <= 1) return; // button is disabled in this case, see render
-    askConfirm(`Delete "${name}" and everything logged for it?`, () => {
-      const remaining = data.days.filter((d) => d.id !== dayId);
-      setData((prev) => ({
-        ...prev,
-        days: remaining,
-        program: { ...prev.program, order: prev.program.order.filter((id) => id !== dayId) },
-      }));
-      if (data.activeDayId === dayId) setActiveDayId(remaining[0]?.id ?? null);
-    });
-  };
-
-  // ============================================================
-  // Flexibility side — same shapes and behaviors as strength above, adapted for
-  // timer/checkbox sets instead of weight/reps, and body-area categories instead of
-  // muscle groups.
-  // ============================================================
-
-  const updateFlexDay = (dayId, fn) => {
-    setData((prev) => ({
-      ...prev,
-      flexDays: prev.flexDays.map((d) => (d.id === dayId ? fn(d) : d)),
-    }));
-  };
-
-  const reorderFlexExercises = (dayId, fromIndex, toIndex) => {
-    updateFlexDay(dayId, (d) => ({ ...d, exercises: moveItem(d.exercises, fromIndex, toIndex) }));
-  };
-
-  const reorderFlexDays = (fromIndex, toIndex) => {
-    setData((prev) => ({ ...prev, flexDays: moveItem(prev.flexDays, fromIndex, toIndex) }));
-  };
-
-  const handleFlexExercisePointerDown = (id) => (e) => {
-    e.preventDefault();
-    flexExerciseDragState.current = { id };
-    setDraggingFlexExerciseId(id);
-    try {
-      e.currentTarget.setPointerCapture(e.pointerId);
-    } catch (_) {}
-  };
-
-  const handleFlexExercisePointerMove = (e) => {
-    const st = flexExerciseDragState.current;
-    if (!st || !flexExerciseListRef.current || !activeFlexDay) return;
-    const els = Array.from(flexExerciseListRef.current.querySelectorAll('[data-sort-id]'));
-    const currentIndex = activeFlexDay.exercises.findIndex((ex) => ex.id === st.id);
-    if (currentIndex === -1) return;
-    let targetIndex = els.length - 1;
-    for (let i = 0; i < els.length; i++) {
-      const rect = els[i].getBoundingClientRect();
-      if (e.clientY < rect.top + rect.height / 2) {
-        targetIndex = i;
-        break;
-      }
-    }
-    if (targetIndex !== currentIndex) reorderFlexExercises(activeFlexDay.id, currentIndex, targetIndex);
-  };
-
-  const handleFlexExercisePointerUp = () => {
-    flexExerciseDragState.current = null;
-    setDraggingFlexExerciseId(null);
-  };
-
-  const handleFlexDayPointerDown = (id) => (e) => {
-    e.preventDefault();
-    flexDayDragState.current = { id };
-    setDraggingFlexDayId(id);
-    try {
-      e.currentTarget.setPointerCapture(e.pointerId);
-    } catch (_) {}
-  };
-
-  const handleFlexDayPointerMove = (e) => {
-    const st = flexDayDragState.current;
-    if (!st) return;
-    if (e.cancelable) e.preventDefault();
-
-    if (flexProgramListRef.current) {
-      const rect = flexProgramListRef.current.getBoundingClientRect();
-      const pad = 24;
-      const overProgram = e.clientY >= rect.top - pad && e.clientY <= rect.bottom + pad;
-      if (overProgram) {
-        setFlexProgramDropHover(true);
-        return;
-      }
-      if (flexProgramDropHover) setFlexProgramDropHover(false);
-    }
-
-    if (!flexDayTabsRef.current) return;
-    const els = Array.from(flexDayTabsRef.current.querySelectorAll('[data-sort-id]'));
-    const currentIndex = data.flexDays.findIndex((d) => d.id === st.id);
-    if (currentIndex === -1) return;
-    let targetIndex = els.length - 1;
-    for (let i = 0; i < els.length; i++) {
-      const rect = els[i].getBoundingClientRect();
-      if (e.clientX < rect.left + rect.width / 2) {
-        targetIndex = i;
-        break;
-      }
-    }
-    if (targetIndex !== currentIndex) {
-      reorderFlexDays(currentIndex, targetIndex);
-    }
-  };
-
-  const handleFlexDayPointerUp = (e) => {
-    const st = flexDayDragState.current;
-    if (st && flexProgramListRef.current && e) {
-      const rect = flexProgramListRef.current.getBoundingClientRect();
-      const pad = 24;
-      const overProgram = e.clientY >= rect.top - pad && e.clientY <= rect.bottom + pad;
-      if (overProgram) addToFlexProgram(st.id);
-    }
-    setFlexProgramDropHover(false);
-    flexDayDragState.current = null;
-    setDraggingFlexDayId(null);
-  };
-
-  const removeFromFlexProgram = (dayId, dayName) => {
-    askConfirm(
-      `Remove "${dayName}" from the active program? You can drag it back in from Sessions anytime.`,
-      () => {
-        setData((prev) => ({ ...prev, flexProgram: { ...prev.flexProgram, order: prev.flexProgram.order.filter((id) => id !== dayId) } }));
-      },
-      'Remove'
-    );
-  };
-
-  const addToFlexProgram = (dayId) => {
-    setData((prev) =>
-      prev.flexProgram.order.includes(dayId)
-        ? prev
-        : { ...prev, flexProgram: { ...prev.flexProgram, order: [...prev.flexProgram.order, dayId] } }
-    );
-  };
-
-  const handleFlexProgramPointerDown = (id) => (e) => {
-    e.preventDefault();
-    flexProgramDragState.current = { id };
-    setDraggingFlexProgramId(id);
-    try {
-      e.currentTarget.setPointerCapture(e.pointerId);
-    } catch (_) {}
-  };
-
-  const handleFlexProgramPointerMove = (e) => {
-    const st = flexProgramDragState.current;
-    if (!st) return;
-    if (e.cancelable) e.preventDefault();
-    if (!flexProgramListRef.current) return;
-    const els = Array.from(flexProgramListRef.current.querySelectorAll('[data-sort-id]'));
-    const currentIndex = data.flexProgram.order.findIndex((id) => id === st.id);
-    if (currentIndex === -1) return;
-    let targetIndex = els.length - 1;
-    for (let i = 0; i < els.length; i++) {
-      const rect = els[i].getBoundingClientRect();
-      if (e.clientX < rect.left + rect.width / 2) {
-        targetIndex = i;
-        break;
-      }
-    }
-    if (targetIndex !== currentIndex) {
-      setData((prev) => ({ ...prev, flexProgram: { ...prev.flexProgram, order: moveItem(prev.flexProgram.order, currentIndex, targetIndex) } }));
-    }
-  };
-
-  const handleFlexProgramPointerUp = () => {
-    flexProgramDragState.current = null;
-    setDraggingFlexProgramId(null);
-  };
-
-  const handleResetFlexCycle = () => {
-    askConfirm(
-      "Reset the current cycle? This clears completion marks — your logged history stays intact.",
-      () => setData((prev) => ({ ...prev, flexProgram: { ...prev.flexProgram, loggedIds: [] } })),
-      'Reset'
-    );
-  };
-
-  const addToFlexLibrary = (name, area = 'Other') => {
-    const trimmed = name.trim();
-    if (!trimmed) return;
-    setData((prev) => {
-      const exists = prev.flexLibrary.some((l) => l.name.toLowerCase() === trimmed.toLowerCase());
-      if (exists) return prev;
-      return { ...prev, flexLibrary: [...prev.flexLibrary, { id: genId('lib'), name: trimmed, area }] };
-    });
-  };
-
-  const removeFromFlexLibrary = (id, name) => {
-    askConfirm(`Remove "${name}" from your library? Any logs already recorded under that name stay untouched.`, () => {
-      setData((prev) => ({ ...prev, flexLibrary: prev.flexLibrary.filter((l) => l.id !== id) }));
-    });
-  };
-
-  const updateFlexLibraryArea = (id, area) => {
-    setData((prev) => ({ ...prev, flexLibrary: prev.flexLibrary.map((l) => (l.id === id ? { ...l, area } : l)) }));
-  };
-
-  const addFlexSet = (dayId, exId) => {
-    clearJustLogged(dayId, exId);
-    updateFlexExercise(dayId, exId, (ex) => ({ ...ex, sets: [...ex.sets, { completed: false }] }));
-  };
-
-  const removeFlexSet = (dayId, exId, idx) => {
-    cancelTimer(dayId, exId, idx);
-    clearJustLogged(dayId, exId);
-    updateFlexExercise(dayId, exId, (ex) => {
-      if (ex.sets.length <= 1) return { ...ex, sets: [{ completed: false }] };
-      return { ...ex, sets: ex.sets.filter((_, i) => i !== idx) };
-    });
-  };
-
-  const clearFlexSets = (dayId, exId) => {
-    clearJustLogged(dayId, exId);
-    updateFlexExercise(dayId, exId, (ex) => ({ ...ex, sets: [{ completed: false }] }));
-  };
-
-  const updateFlexNotes = (dayId, exId, text) => {
-    updateFlexExercise(dayId, exId, (ex) => ({ ...ex, notes: text }));
-  };
-
-  const logFlexSession = (dayId, exId) => {
-    const day = data.flexDays.find((d) => d.id === dayId);
-    const ex = day?.exercises.find((e) => e.id === exId);
-    if (!ex) return;
-    const meaningful = meaningfulStretchSets(ex.sets);
-    if (!meaningful.length) return;
-
-    const updatedEx = {
-      ...ex,
-      history: [{ id: genId('log'), date: new Date().toISOString(), sets: meaningful }, ...ex.history],
-    };
-    const updatedDays = data.flexDays.map((d) =>
-      d.id === dayId ? { ...d, exercises: d.exercises.map((e) => (e.id === exId ? updatedEx : e)) } : d
-    );
-    const loggedIds = data.flexProgram.loggedIds.includes(exId)
-      ? data.flexProgram.loggedIds
-      : [...data.flexProgram.loggedIds, exId];
-    const cycleComplete =
-      data.flexProgram.order.length > 0 &&
-      data.flexProgram.order.every((id) => {
-        const d = updatedDays.find((dd) => dd.id === id);
-        return d && dayIsComplete(d, loggedIds, data.flexProgram.skippedIds);
-      });
-
-    setData((prev) => {
-      let flexDays = prev.flexDays.map((d) =>
-        d.id === dayId ? { ...d, exercises: d.exercises.map((e) => (e.id === exId ? updatedEx : e)) } : d
-      );
-      if (cycleComplete) {
-        flexDays = flexDays.map((d) =>
-          prev.flexProgram.order.includes(d.id)
-            ? { ...d, exercises: d.exercises.map((e) => ({ ...e, sets: e.sets.map(() => ({ completed: false })) })) }
-            : d
-        );
-      }
-      return {
-        ...prev,
-        flexDays,
-        flexProgram: {
-          ...prev.flexProgram,
-          loggedIds: cycleComplete ? [] : loggedIds,
-          skippedIds: cycleComplete ? [] : prev.flexProgram.skippedIds,
-        },
-      };
-    });
-
-    if (cycleComplete) {
-      setJustLoggedKeys(new Set());
-      showToast('Flexibility cycle complete — reset for the next round');
-    } else {
-      markJustLogged(dayId, exId);
-    }
-  };
-
-  // Marks a stretch as intentionally skipped for this cycle (no data recorded), so the day
-  // and program can still be considered complete without pretending it was actually done.
-  const skipFlexExercise = (dayId, exId) => {
-    if (data.flexProgram.skippedIds.includes(exId)) {
-      setData((prev) => ({
-        ...prev,
-        flexProgram: { ...prev.flexProgram, skippedIds: prev.flexProgram.skippedIds.filter((id) => id !== exId) },
-      }));
-      return;
-    }
-
-    const skippedIds = [...data.flexProgram.skippedIds, exId];
-    const cycleComplete =
-      data.flexProgram.order.length > 0 &&
-      data.flexProgram.order.every((id) => {
-        const d = data.flexDays.find((dd) => dd.id === id);
-        return d && dayIsComplete(d, data.flexProgram.loggedIds, skippedIds);
-      });
-
-    setData((prev) => {
-      let flexDays = prev.flexDays;
-      if (cycleComplete) {
-        flexDays = prev.flexDays.map((d) =>
-          prev.flexProgram.order.includes(d.id)
-            ? { ...d, exercises: d.exercises.map((e) => ({ ...e, sets: e.sets.map(() => ({ completed: false })) })) }
-            : d
-        );
-      }
-      return {
-        ...prev,
-        flexDays,
-        flexProgram: {
-          ...prev.flexProgram,
-          loggedIds: cycleComplete ? [] : prev.flexProgram.loggedIds,
-          skippedIds: cycleComplete ? [] : skippedIds,
-        },
-      };
-    });
-
-    if (cycleComplete) {
-      setJustLoggedKeys(new Set());
-      showToast('Flexibility cycle complete — reset for the next round');
-    }
-  };
-
-  const editFlexHistoryEntry = (targetDayId, targetExId, ownerDayId, ownerExId, entryId) => {
-    const ownerDay = data.flexDays.find((d) => d.id === ownerDayId);
-    const ownerEx = ownerDay?.exercises.find((e) => e.id === ownerExId);
-    const entry = ownerEx?.history.find((h) => h.id === entryId);
-    if (!entry) return;
-    const newSets = entry.sets.length ? entry.sets.map((s) => ({ completed: s.completed })) : [{ completed: false }];
-    clearJustLogged(targetDayId, targetExId);
-
-    setData((prev) => ({
-      ...prev,
-      flexDays: prev.flexDays.map((d) => {
-        let day = d;
-        if (day.id === ownerDayId) {
-          day = {
-            ...day,
-            exercises: day.exercises.map((e) => (e.id === ownerExId ? { ...e, history: e.history.filter((h) => h.id !== entryId) } : e)),
-          };
-        }
-        if (day.id === targetDayId) {
-          day = { ...day, exercises: day.exercises.map((e) => (e.id === targetExId ? { ...e, sets: newSets } : e)) };
-        }
-        return day;
-      }),
-    }));
-  };
-
-  const deleteFlexHistoryEntry = (dayId, exId, entryId, dateLabel) => {
-    askConfirm(`Delete the log from ${dateLabel}? This can't be undone.`, () => {
-      updateFlexExercise(dayId, exId, (ex) => ({ ...ex, history: ex.history.filter((h) => h.id !== entryId) }));
-    });
-  };
-
-  const archiveAndSwapFlex = (dayId, exId, newName) => {
-    updateFlexDay(dayId, (d) => {
-      const idx = d.exercises.findIndex((e) => e.id === exId);
-      if (idx === -1) return d;
-      const old = d.exercises[idx];
-      const fresh = mkStretch(newName);
-      const exercises = [...d.exercises];
-      exercises[idx] = fresh;
-      return { ...d, exercises, archived: [old, ...(d.archived || [])] };
-    });
-  };
-
-  const restoreFlexExercise = (dayId, archivedId) => {
-    updateFlexDay(dayId, (d) => {
-      const archived = d.archived || [];
-      const idx = archived.findIndex((e) => e.id === archivedId);
-      if (idx === -1) return d;
-      const ex = archived[idx];
-      return { ...d, exercises: [...d.exercises, ex], archived: archived.filter((e) => e.id !== archivedId) };
-    });
-  };
-
-  const deleteFlexArchived = (dayId, archivedId, name) => {
-    askConfirm(`Permanently delete archived "${name}"? This can't be undone.`, () => {
-      updateFlexDay(dayId, (d) => ({ ...d, archived: (d.archived || []).filter((e) => e.id !== archivedId) }));
-    });
-  };
-
-  const archiveFlexExercise = (dayId, exId) => {
-    updateFlexDay(dayId, (d) => {
-      const idx = d.exercises.findIndex((e) => e.id === exId);
-      if (idx === -1) return d;
-      const ex = d.exercises[idx];
-      return { ...d, exercises: d.exercises.filter((e) => e.id !== exId), archived: [ex, ...(d.archived || [])] };
-    });
-  };
-
-  const deleteFlexExercise = (dayId, exId, name) => {
-    askConfirm(
-      `Archive "${name}"? You'll find it under this stretch in the Flex Library tab, and can restore it anytime.`,
-      () => archiveFlexExercise(dayId, exId),
-      'Archive'
-    );
-  };
-
-  const addFlexExercise = (dayId, name) => {
-    updateFlexDay(dayId, (d) => ({ ...d, exercises: [...d.exercises, mkStretch(name)] }));
-    setAddingFlexExerciseFor(null);
-  };
-
-  const addFlexDay = () => {
-    const name = newFlexDayName.trim();
-    if (!name) return;
-    const id = genId('day');
-    setData((prev) => ({
-      ...prev,
-      flexDays: [...prev.flexDays, { id, name, exercises: [], archived: [] }],
-      flexProgram: { ...prev.flexProgram, order: [...prev.flexProgram.order, id] },
-    }));
-    setActiveFlexDayId(id);
-    setNewFlexDayName('');
-    setAddingFlexDay(false);
-  };
-
-  const startRenameFlexDay = (dayId, currentName) => {
-    setEditingFlexDayId(dayId);
-    setEditingFlexDayName(currentName);
-  };
-
-  const confirmRenameFlexDay = (dayId) => {
-    const name = editingFlexDayName.trim();
-    if (name) {
-      setData((prev) => ({ ...prev, flexDays: prev.flexDays.map((d) => (d.id === dayId ? { ...d, name } : d)) }));
-    }
-    setEditingFlexDayId(null);
-  };
-
-  const deleteFlexDay = (dayId, name) => {
-    if (data.flexDays.length <= 1) return;
-    askConfirm(`Delete "${name}" and everything logged for it?`, () => {
-      const remaining = data.flexDays.filter((d) => d.id !== dayId);
-      setData((prev) => ({
-        ...prev,
-        flexDays: remaining,
-        flexProgram: { ...prev.flexProgram, order: prev.flexProgram.order.filter((id) => id !== dayId) },
-      }));
-      if (data.flexActiveDayId === dayId) setActiveFlexDayId(remaining[0]?.id ?? null);
-    });
-  };
-
-  return (
-    <div className="min-h-screen bg-stone-950 text-stone-100">
-      <style>{`
-        @keyframes marquee-scroll {
-          from { transform: translateX(0); }
-          to { transform: translateX(-50%); }
-        }
-      `}</style>
-      <div className="max-w-2xl mx-auto px-4 pt-6 pb-24">
-        {/* Header */}
-        <div className="flex items-start justify-between mb-5">
-          <div>
-            <h1 className="text-2xl font-black tracking-tight text-stone-50 uppercase" style={{ letterSpacing: '0.02em' }}>
-              Gainz Gizmo
-            </h1>
-            <p className="text-xs text-stone-500 mt-0.5">Weight in lbs · tap a set to edit</p>
-          </div>
-          <SaveIndicator state={saveState} />
-        </div>
-
-        {/* View switcher */}
-        <div className="flex items-center gap-1 mb-5 bg-stone-900 rounded-md p-1 w-fit flex-wrap">
-          <button
-            onClick={() => setView('log')}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-bold uppercase tracking-wide transition-colors ${
-              view === 'log' ? 'bg-cyan-600 text-stone-950' : 'text-stone-500 hover:text-stone-300'
-            }`}
-          >
-            <ListChecks className="w-3.5 h-3.5" /> Log
-          </button>
-          <button
-            onClick={() => setView('library')}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-bold uppercase tracking-wide transition-colors ${
-              view === 'library' ? 'bg-cyan-600 text-stone-950' : 'text-stone-500 hover:text-stone-300'
-            }`}
-          >
-            <LibraryIcon className="w-3.5 h-3.5" /> Library ({data.library.length})
-          </button>
-          <button
-            onClick={() => setView('flexLog')}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-bold uppercase tracking-wide transition-colors ${
-              view === 'flexLog' ? 'bg-violet-400 text-stone-950' : 'text-stone-500 hover:text-stone-300'
-            }`}
-          >
-            <RefreshCw className="w-3.5 h-3.5" /> Flexibility
-          </button>
-          <button
-            onClick={() => setView('flexLibrary')}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-bold uppercase tracking-wide transition-colors ${
-              view === 'flexLibrary' ? 'bg-violet-400 text-stone-950' : 'text-stone-500 hover:text-stone-300'
-            }`}
-          >
-            <LibraryIcon className="w-3.5 h-3.5" /> Flex Library ({data.flexLibrary.length})
-          </button>
-        </div>
-
-        {view === 'library' ? (
-          <LibraryView
-            library={data.library}
-            categories={MUSCLE_GROUPS}
-            colorFn={groupColor}
-            categoryField="muscleGroup"
-            onAdd={addToLibrary}
-            onRemove={removeFromLibrary}
-            onSelect={setPrName}
-            onUpdateGroup={updateLibraryGroup}
-            onExport={exportData}
-            onImportParsed={importData}
-            onImportError={(msg) => showToast(msg, 'error')}
-            showBackup
-          />
-        ) : view === 'flexLibrary' ? (
-          <LibraryView
-            library={data.flexLibrary}
-            categories={BODY_AREAS}
-            colorFn={areaColor}
-            categoryField="area"
-            onAdd={addToFlexLibrary}
-            onRemove={removeFromFlexLibrary}
-            onSelect={setFlexPrName}
-            onUpdateGroup={updateFlexLibraryArea}
-            accent="violet"
-            itemLabel="stretch"
-          />
-        ) : view === 'flexLog' ? (
-          <>
-            {/* Day tabs */}
-            <div className="flex items-center justify-between mb-1.5">
-              <button
-                onClick={() => setData((prev) => ({ ...prev, flexSessionsCollapsed: !prev.flexSessionsCollapsed }))}
-                className="flex items-center gap-1 text-[11px] font-bold uppercase tracking-wide text-stone-500 hover:text-stone-300"
-              >
-                {data.flexSessionsCollapsed ? <ChevronDown className="w-3 h-3" /> : <ChevronUp className="w-3 h-3" />}
-                Sessions
-              </button>
-              <button
-                onClick={() => setFlexReorderMode((v) => !v)}
-                className={`text-[11px] font-bold uppercase tracking-wide ${
-                  flexReorderMode ? 'text-violet-400 hover:text-violet-300' : 'text-stone-600 hover:text-stone-400'
-                }`}
-              >
-                {flexReorderMode ? 'Done' : 'Reorder'}
-              </button>
-            </div>
-            {!data.flexSessionsCollapsed && (
-            <div
-              ref={flexDayTabsRef}
-              className={`flex items-center gap-1.5 pb-1 mb-5 -mx-1 px-1 ${draggingFlexDayId ? 'overflow-x-hidden' : 'overflow-x-auto'}`}
-            >
-              {data.flexDays.map((d) => (
-                <div
-                  key={d.id}
-                  data-sort-id={d.id}
-                  className={`shrink-0 flex items-center rounded-md text-sm font-bold uppercase tracking-wide transition-all select-none ${
-                    d.id === data.flexActiveDayId
-                      ? 'bg-violet-400 text-stone-950'
-                      : 'bg-stone-900 text-stone-400 hover:bg-stone-800 hover:text-stone-200'
-                  } ${draggingFlexDayId === d.id ? 'opacity-70 ring-2 ring-violet-300 scale-105' : ''}`}
-                >
-                  {flexReorderMode && (
-                    <button
-                      onPointerDown={handleFlexDayPointerDown(d.id)}
-                      onPointerMove={handleFlexDayPointerMove}
-                      onPointerUp={handleFlexDayPointerUp}
-                      onPointerCancel={handleFlexDayPointerUp}
-                      style={{ touchAction: 'none' }}
-                      className="pl-2 pr-0.5 py-2 cursor-grab active:cursor-grabbing opacity-70"
-                      aria-label={`Reorder ${d.name}`}
-                    >
-                      <GripVertical className="w-3.5 h-3.5" />
-                    </button>
-                  )}
-                  <button
-                    onClick={() => setActiveFlexDayId(d.id)}
-                    className={flexReorderMode ? 'pl-1 pr-3.5 py-2' : 'px-3.5 py-2'}
-                  >
-                    {d.name}
-                  </button>
-                </div>
-              ))}
-              {addingFlexDay ? (
-                <div className="shrink-0 flex items-center gap-1 bg-stone-900 rounded-md px-2 py-1">
-                  <input
-                    autoFocus
-                    value={newFlexDayName}
-                    onChange={(e) => setNewFlexDayName(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') addFlexDay();
-                      if (e.key === 'Escape') setAddingFlexDay(false);
-                    }}
-                    placeholder="Day name"
-                    className="bg-transparent text-sm text-stone-100 placeholder-stone-600 outline-none w-24"
-                  />
-                  <button onClick={addFlexDay} className="text-violet-300 hover:text-violet-400">
-                    <Check className="w-4 h-4" />
-                  </button>
-                  <button onClick={() => setAddingFlexDay(false)} className="text-stone-600 hover:text-stone-400">
-                    <X className="w-4 h-4" />
-                  </button>
-                </div>
-              ) : (
-                <button
-                  onClick={() => setAddingFlexDay(true)}
-                  className="shrink-0 w-9 h-9 flex items-center justify-center rounded-md bg-stone-900 text-stone-500 hover:bg-stone-800 hover:text-stone-300"
-                  aria-label="Add day"
-                >
-                  <Plus className="w-4 h-4" />
-                </button>
-              )}
-            </div>
-            )}
-
-            {/* Active Program */}
-            {data.flexDays.length > 0 && (
-              <div className="mb-5">
-                <div className="flex items-center justify-between mb-1.5">
-                  <p className="text-[11px] font-bold uppercase tracking-wide text-stone-500">
-                    Active Program{' '}
-                    <span className="text-stone-700">
-                      ({data.flexProgram.order.filter((id) => {
-                        const d = data.flexDays.find((dd) => dd.id === id);
-                        return d && dayIsComplete(d, data.flexProgram.loggedIds, data.flexProgram.skippedIds);
-                      }).length}
-                      /{data.flexProgram.order.length} complete)
-                    </span>
-                  </p>
-                  {data.flexProgram.loggedIds.length > 0 && (
-                    <button
-                      onClick={handleResetFlexCycle}
-                      className="flex items-center gap-1 text-[11px] text-stone-600 hover:text-red-500"
-                    >
-                      <RefreshCw className="w-3 h-3" /> Reset cycle
-                    </button>
-                  )}
-                </div>
-                <div
-                  ref={flexProgramListRef}
-                  style={{ minHeight: '2.75rem' }}
-                  className={`flex items-center gap-1.5 pb-1 -mx-1 px-1 rounded-md transition-colors ${
-                    draggingFlexProgramId ? 'overflow-x-hidden' : 'overflow-x-auto'
-                  } ${flexProgramDropHover ? 'bg-violet-500/10 ring-2 ring-violet-500/50' : ''}`}
-                >
-                  {data.flexProgram.order.map((dayId) => {
-                    const day = data.flexDays.find((d) => d.id === dayId);
-                    if (!day) return null;
-                    const complete = dayIsComplete(day, data.flexProgram.loggedIds, data.flexProgram.skippedIds);
-                    const isSelected = dayId === data.flexActiveDayId;
-                    return (
-                      <div
-                        key={dayId}
-                        data-sort-id={dayId}
-                        className={`shrink-0 flex items-center rounded-md text-sm font-bold uppercase tracking-wide border transition-all select-none ${
-                          complete
-                            ? 'bg-emerald-500/10 border-emerald-500/40 text-emerald-400'
-                            : 'bg-stone-900 border-stone-800 text-stone-400'
-                        } ${isSelected ? 'ring-2 ring-violet-300' : ''} ${
-                          draggingFlexProgramId === dayId ? 'opacity-70 ring-2 ring-violet-300 scale-105' : ''
-                        }`}
-                      >
-                        <button
-                          onClick={() => setActiveFlexDayId(dayId)}
-                          className={`flex items-center gap-1.5 py-2 ${flexReorderMode ? 'pl-1 pr-1' : 'pl-3 pr-1'}`}
-                        >
-                          {complete && <Check className="w-3.5 h-3.5" />}
-                          {day.name}
-                        </button>
-                        {flexReorderMode && (
-                          <button
-                            onPointerDown={handleFlexProgramPointerDown(dayId)}
-                            onPointerMove={handleFlexProgramPointerMove}
-                            onPointerUp={handleFlexProgramPointerUp}
-                            onPointerCancel={handleFlexProgramPointerUp}
-                            style={{ touchAction: 'none' }}
-                            className="pl-1 pr-1 py-2 opacity-70 cursor-grab active:cursor-grabbing"
-                            aria-label={`Reorder ${day.name} in program`}
-                          >
-                            <GripVertical className="w-3.5 h-3.5" />
-                          </button>
-                        )}
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            removeFromFlexProgram(dayId, day.name);
-                          }}
-                          className="pl-1 pr-2 py-2 opacity-60 hover:opacity-100"
-                          aria-label={`Remove ${day.name} from program`}
-                          title="Remove from program"
-                        >
-                          <X className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-
-            {/* Active day controls */}
-            {activeFlexDay && (
-              <div className="flex items-center justify-between mb-3">
-                {editingFlexDayId === activeFlexDay.id ? (
-                  <div className="flex items-center gap-1.5">
-                    <input
-                      autoFocus
-                      value={editingFlexDayName}
-                      onChange={(e) => setEditingFlexDayName(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') confirmRenameFlexDay(activeFlexDay.id);
-                        if (e.key === 'Escape') setEditingFlexDayId(null);
-                      }}
-                      className="bg-stone-900 border border-stone-700 rounded px-2 py-1 text-sm text-stone-100 outline-none focus:border-violet-600"
-                    />
-                    <button onClick={() => confirmRenameFlexDay(activeFlexDay.id)} className="text-violet-300 hover:text-violet-400">
-                      <Check className="w-4 h-4" />
-                    </button>
-                  </div>
-                ) : (
-                  <button
-                    onClick={() => startRenameFlexDay(activeFlexDay.id, activeFlexDay.name)}
-                    className="flex items-center gap-1.5 text-stone-500 hover:text-stone-300 text-xs"
-                  >
-                    <Pencil className="w-3 h-3" /> Rename day
-                  </button>
-                )}
-                <button
-                  onClick={() => deleteFlexDay(activeFlexDay.id, activeFlexDay.name)}
-                  disabled={data.flexDays.length <= 1}
-                  title={data.flexDays.length <= 1 ? 'Add another day before deleting this one' : undefined}
-                  className={`flex items-center gap-1.5 text-xs ${
-                    data.flexDays.length <= 1 ? 'text-stone-800 cursor-not-allowed' : 'text-stone-600 hover:text-red-500'
-                  }`}
-                >
-                  <Trash2 className="w-3 h-3" /> Delete day
-                </button>
-              </div>
-            )}
-
-            {/* Exercises */}
-            <div className="space-y-3">
-              {activeFlexDay && activeFlexDay.exercises.length === 0 && (
-                <div className="text-center py-10 text-stone-600 text-sm border border-dashed border-stone-800 rounded-lg">
-                  No stretches yet. Add your first one below.
-                </div>
-              )}
-
-              {activeFlexDay && activeFlexDay.exercises.length > 0 && (
-                <div ref={flexExerciseListRef} className="space-y-3">
-                  {activeFlexDay.exercises.map((ex) => {
-                    const gc = areaColor(areaForName(ex.name));
-                    const mergedHistory = getFullHistory(data.flexDays, ex.name); // shared across every day with this same stretch name
-                    return (
-                      <div
-                        key={ex.id}
-                        data-sort-id={ex.id}
-                        className={`bg-stone-900 rounded-lg border border-stone-800 ${gc.left} border-l-4 overflow-hidden ${
-                          draggingFlexExerciseId === ex.id ? 'opacity-60 ring-2 ring-violet-300' : ''
-                        }`}
-                      >
-                    {/* Exercise header */}
-                    <div className="px-3.5 pt-3 pb-2">
-                      {flexSwapId === ex.id ? (
-                        <ExercisePicker
-                          library={data.flexLibrary}
-                          categories={BODY_AREAS}
-                          colorFn={areaColor}
-                          categoryField="area"
-                          libraryTabLabel="Flex Library"
-                          initialValue=""
-                          placeholder={`Replace "${ex.name}" with…`}
-                          onChoose={(name) => {
-                            archiveAndSwapFlex(activeFlexDay.id, ex.id, name);
-                            setFlexSwapId(null);
-                          }}
-                          onCancel={() => setFlexSwapId(null)}
-                          onGoToLibrary={() => {
-                            setFlexSwapId(null);
-                            setView('flexLibrary');
-                          }}
-                        />
-                      ) : (
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-1.5 min-w-0">
-                            <button
-                              onPointerDown={handleFlexExercisePointerDown(ex.id)}
-                              onPointerMove={handleFlexExercisePointerMove}
-                              onPointerUp={handleFlexExercisePointerUp}
-                              onPointerCancel={handleFlexExercisePointerUp}
-                              style={{ touchAction: 'none' }}
-                              className="text-stone-600 hover:text-stone-400 cursor-grab active:cursor-grabbing shrink-0 -ml-1"
-                              aria-label={`Reorder ${ex.name}`}
-                            >
-                              <GripVertical className="w-4 h-4" />
-                            </button>
-                            <MarqueeText text={ex.name} className="font-bold text-stone-100 text-[15px]" />
-                            <span
-                              className={`shrink-0 text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded border ${gc.bg} ${gc.text} ${gc.border}`}
-                            >
-                              {areaForName(ex.name)}
-                            </span>
-                            {data.flexProgram.skippedIds.includes(ex.id) && (
-                              <span className="shrink-0 text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded border bg-stone-800 text-stone-500 border-stone-700">
-                                Skipped
-                              </span>
-                            )}
-                          </div>
-                          <div className="flex items-center gap-0.5 shrink-0">
-                            <IconButton onClick={() => setFlexSwapId(ex.id)} label="Swap stretch">
-                              <RefreshCw className="w-3.5 h-3.5" />
-                            </IconButton>
-                            <IconButton
-                              onClick={() => toggleNotes(ex.id)}
-                              label="Notes"
-                              active={openNotes[ex.id]}
-                              dot={!!ex.notes.trim()}
-                            >
-                              <StickyNote className="w-3.5 h-3.5" />
-                            </IconButton>
-                            <IconButton
-                              onClick={() => toggleHistory(ex.id)}
-                              label="History"
-                              active={openHistory[ex.id]}
-                            >
-                              <HistoryIcon className="w-3.5 h-3.5" />
-                            </IconButton>
-                            <IconButton onClick={() => deleteFlexExercise(activeFlexDay.id, ex.id, ex.name)} label="Archive stretch">
-                              <ArchiveIcon className="w-3.5 h-3.5" />
-                            </IconButton>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Sets: each is a 30s hold -- start the timer or just tap the check to mark it done */}
-                    <div className="px-3.5 pb-3 space-y-1.5">
-                      {ex.sets.map((s, idx) => {
-                        const timerKey = `${activeFlexDay.id}:${ex.id}:${idx}`;
-                        const timerState = activeTimers[timerKey];
-                        const isRunning = !!timerState;
-                        return (
-                          <div key={idx} className="flex items-center gap-2">
-                            <span className="w-6 h-6 rounded-full bg-violet-300 text-stone-950 text-[11px] font-black flex items-center justify-center shrink-0">
-                              {idx + 1}
-                            </span>
-                            {s.completed ? (
-                              <button
-                                onClick={() => toggleFlexSetComplete(activeFlexDay.id, ex.id, idx)}
-                                className="flex-1 flex items-center justify-center gap-1.5 bg-emerald-500/10 border border-emerald-500/40 rounded px-3 py-1.5 text-sm text-emerald-300 font-bold"
-                              >
-                                <Check className="w-4 h-4" /> Held {STRETCH_HOLD_SECONDS}s
-                              </button>
-                            ) : isRunning ? (
-                              <div className="flex-1 flex items-center gap-2">
-                                <div className="flex-1 bg-stone-950 border border-violet-400 rounded px-3 py-1.5 text-sm text-violet-300 font-mono tabular-nums text-center">
-                                  {timerState.phase === 'countdown' ? `Get ready… ${timerState.secondsLeft}` : `${timerState.secondsLeft}s…`}
-                                </div>
-                                <button
-                                  onClick={() => cancelTimer(activeFlexDay.id, ex.id, idx)}
-                                  className="text-stone-600 hover:text-red-500 text-xs shrink-0"
-                                >
-                                  Cancel
-                                </button>
-                              </div>
-                            ) : (
-                              <div className="flex-1 flex items-center gap-2">
-                                <button
-                                  onClick={() => startTimer(activeFlexDay.id, ex.id, idx)}
-                                  className="flex-1 flex items-center justify-center gap-1.5 bg-stone-950 border border-stone-800 rounded px-3 py-1.5 text-sm text-violet-300 hover:border-violet-400 font-bold"
-                                >
-                                  <HistoryIcon className="w-3.5 h-3.5" /> Start {STRETCH_HOLD_SECONDS}s
-                                </button>
-                                <button
-                                  onClick={() => toggleFlexSetComplete(activeFlexDay.id, ex.id, idx)}
-                                  className="text-stone-600 hover:text-emerald-400 shrink-0"
-                                  aria-label="Mark complete without the timer"
-                                  title="Mark complete without the timer"
-                                >
-                                  <Check className="w-4 h-4" />
-                                </button>
-                              </div>
-                            )}
-                            <button
-                              onClick={() => removeFlexSet(activeFlexDay.id, ex.id, idx)}
-                              className="text-stone-700 hover:text-red-500 shrink-0"
-                              aria-label="Remove set"
-                            >
-                              <X className="w-3.5 h-3.5" />
-                            </button>
-                          </div>
-                        );
-                      })}
-                      <button
-                        onClick={() => addFlexSet(activeFlexDay.id, ex.id)}
-                        className="flex items-center gap-1 text-xs text-violet-400 hover:text-violet-300 mt-1 pl-8"
-                      >
-                        <Plus className="w-3 h-3" /> Add set
-                      </button>
-                    </div>
-
-                    {/* Notes panel */}
-                    {openNotes[ex.id] && (
-                      <div className="px-3.5 pb-3 border-t border-stone-800 pt-2.5">
-                        <textarea
-                          value={ex.notes}
-                          onChange={(e) => updateFlexNotes(activeFlexDay.id, ex.id, e.target.value)}
-                          placeholder="Form cues, pain flags, tempo, anything worth remembering…"
-                          rows={2}
-                          className="w-full bg-stone-950 border border-stone-800 rounded px-2.5 py-2 text-sm text-stone-200 placeholder-stone-700 outline-none focus:border-violet-400 resize-none"
-                        />
-                      </div>
-                    )}
-
-                    {/* History panel: just a recent-3 glance -- full history lives in the Library tab's PR view.
-                        Shared across every flex day that has a stretch with this same name. */}
-                    {openHistory[ex.id] && (() => {
-                      return (
-                      <div className="px-3.5 pb-3 border-t border-stone-800 pt-2.5">
-                        {mergedHistory.length === 0 ? (
-                          <p className="text-xs text-stone-600">No sessions logged yet.</p>
-                        ) : (
-                          <div className="space-y-1">
-                            {mergedHistory.slice(0, 3).map((h) => {
-                              const fromOtherDay = h.ownerDayId !== activeFlexDay.id;
-                              const ownerDayName = fromOtherDay ? data.flexDays.find((d) => d.id === h.ownerDayId)?.name : null;
-                              return (
-                              <div key={h.id} className="flex items-center gap-2 text-xs group">
-                                <span className="text-stone-500 font-mono shrink-0 w-12">{formatDate(h.date)}</span>
-                                <span className="text-stone-300 font-mono tabular-nums flex-1 min-w-0 truncate">
-                                  {summarizeStretchSets(h.sets)}
-                                  {ownerDayName && <span className="text-stone-600"> · {ownerDayName}</span>}
-                                </span>
-                                <button
-                                  onClick={() => editFlexHistoryEntry(activeFlexDay.id, ex.id, h.ownerDayId, h.ownerExId, h.id)}
-                                  className="text-stone-600 hover:text-violet-300 shrink-0"
-                                  aria-label={`Edit log from ${formatDate(h.date)}`}
-                                >
-                                  <Pencil className="w-3 h-3" />
-                                </button>
-                                <button
-                                  onClick={() => deleteFlexHistoryEntry(h.ownerDayId, h.ownerExId, h.id, formatDate(h.date))}
-                                  className="text-stone-600 hover:text-red-500 shrink-0"
-                                  aria-label={`Delete log from ${formatDate(h.date)}`}
-                                >
-                                  <Trash2 className="w-3 h-3" />
-                                </button>
-                              </div>
-                              );
-                            })}
-                          </div>
-                        )}
-                        {mergedHistory.length > 3 && (
-                          <button
-                            onClick={() => {
-                              setView('flexLibrary');
-                              setFlexPrName(ex.name);
-                            }}
-                            className="text-[11px] text-violet-400 hover:text-violet-400 mt-2"
-                          >
-                            See all {mergedHistory.length} sessions & PR →
-                          </button>
-                        )}
-                      </div>
-                    );
-                    })()}
-
-                    {/* Footer: log session, which becomes an Edit button right after logging */}
-                    <div className="flex items-center justify-between px-3.5 py-2.5 bg-stone-950 border-t border-stone-800">
-                      <span className="text-[11px] text-stone-600">
-                        {data.flexProgram.skippedIds.includes(ex.id)
-                          ? 'Skipped this round'
-                          : mergedHistory.length > 0
-                          ? `Last logged ${formatDate(mergedHistory[0].date)}`
-                          : 'Not logged yet'}
-                      </span>
-                      <div className="flex items-center gap-2">
-                        <button onClick={() => clearFlexSets(activeFlexDay.id, ex.id)} className="text-[11px] text-stone-600 hover:text-stone-400">
-                          Clear
-                        </button>
-                        <button
-                          onClick={() => skipFlexExercise(activeFlexDay.id, ex.id)}
-                          className={`text-[11px] ${
-                            data.flexProgram.skippedIds.includes(ex.id) ? 'text-violet-400 hover:text-violet-300' : 'text-stone-600 hover:text-stone-400'
-                          }`}
-                        >
-                          {data.flexProgram.skippedIds.includes(ex.id) ? 'Undo skip' : 'Skip'}
-                        </button>
-                        {(() => {
-                          const isEditable = justLoggedKeys.has(`${activeFlexDay.id}:${ex.id}`);
-                          return (
-                            <button
-                              onClick={() =>
-                                isEditable
-                                  ? editFlexHistoryEntry(activeFlexDay.id, ex.id, activeFlexDay.id, ex.id, ex.history[0]?.id)
-                                  : logFlexSession(activeFlexDay.id, ex.id)
-                              }
-                              className={`flex items-center gap-1 text-xs font-bold px-2.5 py-1.5 rounded ${
-                                isEditable
-                                  ? 'bg-stone-800 text-stone-300 hover:bg-stone-700'
-                                  : 'bg-violet-400 text-stone-950 hover:bg-violet-300'
-                              }`}
-                            >
-                              {isEditable ? (
-                                <>
-                                  <Pencil className="w-3.5 h-3.5" /> Edit
-                                </>
-                              ) : (
-                                'Log session'
-                              )}
-                            </button>
-                          );
-                        })()}
-                      </div>
-                    </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-
-              {/* Complete-day banner: shows once every exercise here is logged, and this day
-                  is part of a multi-day active program -- offers to jump to what's next. */}
-              {activeFlexDay &&
-                data.flexProgram.order.length > 1 &&
-                data.flexProgram.order.includes(activeFlexDay.id) &&
-                dayIsComplete(activeFlexDay, data.flexProgram.loggedIds, data.flexProgram.skippedIds) &&
-                (() => {
-                  const idx = data.flexProgram.order.indexOf(activeFlexDay.id);
-                  const nextId = data.flexProgram.order[(idx + 1) % data.flexProgram.order.length];
-                  const nextDay = data.flexDays.find((d) => d.id === nextId);
-                  return (
-                    <div className="flex items-center justify-between gap-3 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-4 py-3">
-                      <span className="flex items-center gap-1.5 text-sm font-bold text-emerald-300">
-                        <Check className="w-4 h-4" /> Day complete!
-                      </span>
-                      {nextDay && (
-                        <button
-                          onClick={() => advanceToNextDay(activeFlexDay.id)}
-                          className="flex items-center gap-1 px-3 py-1.5 rounded-md bg-emerald-600 text-stone-950 text-xs font-bold hover:bg-emerald-500 whitespace-nowrap"
-                        >
-                          Next: {nextDay.name} →
-                        </button>
-                      )}
-                    </div>
-                  );
-                })()}
-
-              {/* Add exercise */}
-              {activeFlexDay && (
-                <div>
-                  {addingFlexExerciseFor === activeFlexDay.id ? (
-                    <div className="bg-stone-900 rounded-lg border border-stone-800 px-3 py-2.5">
-                      <ExercisePicker
-                        library={data.flexLibrary}
-                        categories={BODY_AREAS}
-                        colorFn={areaColor}
-                        categoryField="area"
-                        libraryTabLabel="Flex Library"
-                        initialValue=""
-                        placeholder="Search your stretches"
-                        onChoose={(name) => addFlexExercise(activeFlexDay.id, name)}
-                        onCancel={() => setAddingFlexExerciseFor(null)}
-                        onGoToLibrary={() => {
-                          setAddingFlexExerciseFor(null);
-                          setView('flexLibrary');
-                        }}
-                      />
-                    </div>
-                  ) : (
-                    <button
-                      onClick={() => setAddingFlexExerciseFor(activeFlexDay.id)}
-                      className="w-full flex items-center justify-center gap-1.5 py-2.5 rounded-lg border border-dashed border-stone-800 text-stone-500 text-sm hover:border-stone-700 hover:text-stone-300"
-                    >
-                      <Plus className="w-4 h-4" /> Add stretch
-                    </button>
-                  )}
-                </div>
-              )}
-            </div>
-          </>
-        ) : (
-          <>
-            {/* Day tabs */}
-            <div className="flex items-center justify-between mb-1.5">
-              <button
-                onClick={() => setData((prev) => ({ ...prev, sessionsCollapsed: !prev.sessionsCollapsed }))}
-                className="flex items-center gap-1 text-[11px] font-bold uppercase tracking-wide text-stone-500 hover:text-stone-300"
-              >
-                {data.sessionsCollapsed ? <ChevronDown className="w-3 h-3" /> : <ChevronUp className="w-3 h-3" />}
-                Sessions
-              </button>
-              <button
-                onClick={() => setReorderMode((v) => !v)}
-                className={`text-[11px] font-bold uppercase tracking-wide ${
-                  reorderMode ? 'text-cyan-500 hover:text-cyan-400' : 'text-stone-600 hover:text-stone-400'
-                }`}
-              >
-                {reorderMode ? 'Done' : 'Reorder'}
-              </button>
-            </div>
-            {!data.sessionsCollapsed && (
-            <div
-              ref={dayTabsRef}
-              className={`flex items-center gap-1.5 pb-1 mb-5 -mx-1 px-1 ${draggingDayId ? 'overflow-x-hidden' : 'overflow-x-auto'}`}
-            >
-              {data.days.map((d) => (
-                <div
-                  key={d.id}
-                  data-sort-id={d.id}
-                  className={`shrink-0 flex items-center rounded-md text-sm font-bold uppercase tracking-wide transition-all select-none ${
-                    d.id === data.activeDayId
-                      ? 'bg-cyan-600 text-stone-950'
-                      : 'bg-stone-900 text-stone-400 hover:bg-stone-800 hover:text-stone-200'
-                  } ${draggingDayId === d.id ? 'opacity-70 ring-2 ring-cyan-400 scale-105' : ''}`}
-                >
-                  {reorderMode && (
-                    <button
-                      onPointerDown={handleDayPointerDown(d.id)}
-                      onPointerMove={handleDayPointerMove}
-                      onPointerUp={handleDayPointerUp}
-                      onPointerCancel={handleDayPointerUp}
-                      style={{ touchAction: 'none' }}
-                      className="pl-2 pr-0.5 py-2 cursor-grab active:cursor-grabbing opacity-70"
-                      aria-label={`Reorder ${d.name}`}
-                    >
-                      <GripVertical className="w-3.5 h-3.5" />
-                    </button>
-                  )}
-                  <button
-                    onClick={() => setActiveDayId(d.id)}
-                    className={reorderMode ? 'pl-1 pr-3.5 py-2' : 'px-3.5 py-2'}
-                  >
-                    {d.name}
-                  </button>
-                </div>
-              ))}
-              {addingDay ? (
-                <div className="shrink-0 flex items-center gap-1 bg-stone-900 rounded-md px-2 py-1">
-                  <input
-                    autoFocus
-                    value={newDayName}
-                    onChange={(e) => setNewDayName(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') addDay();
-                      if (e.key === 'Escape') setAddingDay(false);
-                    }}
-                    placeholder="Day name"
-                    className="bg-transparent text-sm text-stone-100 placeholder-stone-600 outline-none w-24"
-                  />
-                  <button onClick={addDay} className="text-cyan-500 hover:text-cyan-400">
-                    <Check className="w-4 h-4" />
-                  </button>
-                  <button onClick={() => setAddingDay(false)} className="text-stone-600 hover:text-stone-400">
-                    <X className="w-4 h-4" />
-                  </button>
-                </div>
-              ) : (
-                <button
-                  onClick={() => setAddingDay(true)}
-                  className="shrink-0 w-9 h-9 flex items-center justify-center rounded-md bg-stone-900 text-stone-500 hover:bg-stone-800 hover:text-stone-300"
-                  aria-label="Add day"
-                >
-                  <Plus className="w-4 h-4" />
-                </button>
-              )}
-            </div>
-            )}
-
-            {/* Active Program */}
-            {data.days.length > 0 && (
-              <div className="mb-5">
-                <div className="flex items-center justify-between mb-1.5">
-                  <p className="text-[11px] font-bold uppercase tracking-wide text-stone-500">
-                    Active Program{' '}
-                    <span className="text-stone-700">
-                      ({data.program.order.filter((id) => {
-                        const d = data.days.find((dd) => dd.id === id);
-                        return d && dayIsComplete(d, data.program.loggedIds, data.program.skippedIds);
-                      }).length}
-                      /{data.program.order.length} complete)
-                    </span>
-                  </p>
-                  {data.program.loggedIds.length > 0 && (
-                    <button
-                      onClick={handleResetCycle}
-                      className="flex items-center gap-1 text-[11px] text-stone-600 hover:text-red-500"
-                    >
-                      <RefreshCw className="w-3 h-3" /> Reset cycle
-                    </button>
-                  )}
-                </div>
-                <div
-                  ref={programListRef}
-                  style={{ minHeight: '2.75rem' }}
-                  className={`flex items-center gap-1.5 pb-1 -mx-1 px-1 rounded-md transition-colors ${
-                    draggingProgramId ? 'overflow-x-hidden' : 'overflow-x-auto'
-                  } ${programDropHover ? 'bg-cyan-500/10 ring-2 ring-cyan-500/50' : ''}`}
-                >
-                  {data.program.order.map((dayId) => {
-                    const day = data.days.find((d) => d.id === dayId);
-                    if (!day) return null;
-                    const complete = dayIsComplete(day, data.program.loggedIds, data.program.skippedIds);
-                    const isSelected = dayId === data.activeDayId;
-                    return (
-                      <div
-                        key={dayId}
-                        data-sort-id={dayId}
-                        className={`shrink-0 flex items-center rounded-md text-sm font-bold uppercase tracking-wide border transition-all select-none ${
-                          complete
-                            ? 'bg-emerald-500/10 border-emerald-500/40 text-emerald-400'
-                            : 'bg-stone-900 border-stone-800 text-stone-400'
-                        } ${isSelected ? 'ring-2 ring-cyan-400' : ''} ${
-                          draggingProgramId === dayId ? 'opacity-70 ring-2 ring-cyan-400 scale-105' : ''
-                        }`}
-                      >
-                        <button
-                          onClick={() => setActiveDayId(dayId)}
-                          className={`flex items-center gap-1.5 py-2 ${reorderMode ? 'pl-1 pr-1' : 'pl-3 pr-1'}`}
-                        >
-                          {complete && <Check className="w-3.5 h-3.5" />}
-                          {day.name}
-                        </button>
-                        {reorderMode && (
-                          <button
-                            onPointerDown={handleProgramPointerDown(dayId)}
-                            onPointerMove={handleProgramPointerMove}
-                            onPointerUp={handleProgramPointerUp}
-                            onPointerCancel={handleProgramPointerUp}
-                            style={{ touchAction: 'none' }}
-                            className="pl-1 pr-1 py-2 opacity-70 cursor-grab active:cursor-grabbing"
-                            aria-label={`Reorder ${day.name} in program`}
-                          >
-                            <GripVertical className="w-3.5 h-3.5" />
-                          </button>
-                        )}
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            removeFromProgram(dayId, day.name);
-                          }}
-                          className="pl-1 pr-2 py-2 opacity-60 hover:opacity-100"
-                          aria-label={`Remove ${day.name} from program`}
-                          title="Remove from program"
-                        >
-                          <X className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-
-            {/* Active day controls */}
-            {activeDay && (
-              <div className="flex items-center justify-between mb-3">
-                {editingDayId === activeDay.id ? (
-                  <div className="flex items-center gap-1.5">
-                    <input
-                      autoFocus
-                      value={editingDayName}
-                      onChange={(e) => setEditingDayName(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') confirmRenameDay(activeDay.id);
-                        if (e.key === 'Escape') setEditingDayId(null);
-                      }}
-                      className="bg-stone-900 border border-stone-700 rounded px-2 py-1 text-sm text-stone-100 outline-none focus:border-cyan-600"
-                    />
-                    <button onClick={() => confirmRenameDay(activeDay.id)} className="text-cyan-500 hover:text-cyan-400">
-                      <Check className="w-4 h-4" />
-                    </button>
-                  </div>
-                ) : (
-                  <button
-                    onClick={() => startRenameDay(activeDay.id, activeDay.name)}
-                    className="flex items-center gap-1.5 text-stone-500 hover:text-stone-300 text-xs"
-                  >
-                    <Pencil className="w-3 h-3" /> Rename day
-                  </button>
-                )}
-                <button
-                  onClick={() => deleteDay(activeDay.id, activeDay.name)}
-                  disabled={data.days.length <= 1}
-                  title={data.days.length <= 1 ? 'Add another day before deleting this one' : undefined}
-                  className={`flex items-center gap-1.5 text-xs ${
-                    data.days.length <= 1 ? 'text-stone-800 cursor-not-allowed' : 'text-stone-600 hover:text-red-500'
-                  }`}
-                >
-                  <Trash2 className="w-3 h-3" /> Delete day
-                </button>
-              </div>
-            )}
-
-            {/* Exercises */}
-            <div className="space-y-3">
-              {activeDay && activeDay.exercises.length === 0 && (
-                <div className="text-center py-10 text-stone-600 text-sm border border-dashed border-stone-800 rounded-lg">
-                  No exercises yet. Add your first one below.
-                </div>
-              )}
-
-              {activeDay && activeDay.exercises.length > 0 && (
-                <div ref={exerciseListRef} className="space-y-3">
-                  {activeDay.exercises.map((ex) => {
-                    const gc = groupColor(groupForName(ex.name));
-                    const mergedHistory = getFullHistory(data.days, ex.name); // shared across every day with this same exercise name
-                    return (
-                      <div
-                        key={ex.id}
-                        data-sort-id={ex.id}
-                        className={`bg-stone-900 rounded-lg border border-stone-800 ${gc.left} border-l-4 overflow-hidden ${
-                          draggingExerciseId === ex.id ? 'opacity-60 ring-2 ring-cyan-400' : ''
-                        }`}
-                      >
-                    {/* Exercise header */}
-                    <div className="px-3.5 pt-3 pb-2">
-                      {swapId === ex.id ? (
-                        <ExercisePicker
-                          library={data.library}
-                          initialValue=""
-                          placeholder={`Replace "${ex.name}" with…`}
-                          onChoose={(name) => {
-                            archiveAndSwap(activeDay.id, ex.id, name);
-                            setSwapId(null);
-                          }}
-                          onCancel={() => setSwapId(null)}
-                          onGoToLibrary={() => {
-                            setSwapId(null);
-                            setView('library');
-                          }}
-                        />
-                      ) : (
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-1.5 min-w-0">
-                            <button
-                              onPointerDown={handleExercisePointerDown(ex.id)}
-                              onPointerMove={handleExercisePointerMove}
-                              onPointerUp={handleExercisePointerUp}
-                              onPointerCancel={handleExercisePointerUp}
-                              style={{ touchAction: 'none' }}
-                              className="text-stone-600 hover:text-stone-400 cursor-grab active:cursor-grabbing shrink-0 -ml-1"
-                              aria-label={`Reorder ${ex.name}`}
-                            >
-                              <GripVertical className="w-4 h-4" />
-                            </button>
-                            <MarqueeText text={ex.name} className="font-bold text-stone-100 text-[15px]" />
-                            <span
-                              className={`shrink-0 text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded border ${gc.bg} ${gc.text} ${gc.border}`}
-                            >
-                              {groupForName(ex.name)}
-                            </span>
-                            {data.program.skippedIds.includes(ex.id) && (
-                              <span className="shrink-0 text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded border bg-stone-800 text-stone-500 border-stone-700">
-                                Skipped
-                              </span>
-                            )}
-                          </div>
-                          <div className="flex items-center gap-0.5 shrink-0">
-                            <IconButton onClick={() => setSwapId(ex.id)} label="Swap exercise">
-                              <RefreshCw className="w-3.5 h-3.5" />
-                            </IconButton>
-                            <IconButton
-                              onClick={() => toggleNotes(ex.id)}
-                              label="Notes"
-                              active={openNotes[ex.id]}
-                              dot={!!ex.notes.trim()}
-                            >
-                              <StickyNote className="w-3.5 h-3.5" />
-                            </IconButton>
-                            <IconButton
-                              onClick={() => toggleHistory(ex.id)}
-                              label="History"
-                              active={openHistory[ex.id]}
-                            >
-                              <HistoryIcon className="w-3.5 h-3.5" />
-                            </IconButton>
-                            <IconButton onClick={() => deleteExercise(activeDay.id, ex.id, ex.name)} label="Archive exercise">
-                              <ArchiveIcon className="w-3.5 h-3.5" />
-                            </IconButton>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Sets */}
-                    <div className="px-3.5 pb-3 space-y-1.5">
-                      {ex.sets.map((s, idx) => {
-                        const prevSet = mergedHistory[0]?.sets[idx];
-                        return (
-                        <div key={idx} className="flex items-center gap-2">
-                          <span className="w-6 h-6 rounded-full bg-amber-500 text-stone-950 text-[11px] font-black flex items-center justify-center shrink-0">
-                            {idx + 1}
-                          </span>
-                          <input
-                            type="number"
-                            inputMode="decimal"
-                            value={s.weight}
-                            onChange={(e) => updateSetField(activeDay.id, ex.id, idx, 'weight', e.target.value)}
-                            placeholder={prevSet ? String(prevSet.weight) : 'lbs'}
-                            className="w-20 bg-stone-950 border border-stone-800 rounded px-2 py-1.5 text-sm text-stone-100 placeholder-stone-700 outline-none focus:border-cyan-700 font-mono tabular-nums"
-                          />
-                          <span className="text-stone-600 text-sm">×</span>
-                          <input
-                            type="number"
-                            inputMode="numeric"
-                            value={s.reps}
-                            onChange={(e) => updateSetField(activeDay.id, ex.id, idx, 'reps', e.target.value)}
-                            placeholder={prevSet ? String(prevSet.reps) : 'reps'}
-                            className="w-20 bg-stone-950 border border-stone-800 rounded px-2 py-1.5 text-sm text-stone-100 placeholder-stone-700 outline-none focus:border-cyan-700 font-mono tabular-nums"
-                          />
-                          <button
-                            onClick={() => removeSet(activeDay.id, ex.id, idx)}
-                            className="ml-auto text-stone-700 hover:text-red-500"
-                            aria-label="Remove set"
-                          >
-                            <X className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                        );
-                      })}
-                      <button
-                        onClick={() => addSet(activeDay.id, ex.id)}
-                        className="flex items-center gap-1 text-xs text-cyan-600 hover:text-cyan-400 mt-1 pl-8"
-                      >
-                        <Plus className="w-3 h-3" /> Add set
-                      </button>
-                    </div>
-
-                    {/* Notes panel */}
-                    {openNotes[ex.id] && (
-                      <div className="px-3.5 pb-3 border-t border-stone-800 pt-2.5">
-                        <textarea
-                          value={ex.notes}
-                          onChange={(e) => updateNotes(activeDay.id, ex.id, e.target.value)}
-                          placeholder="Form cues, pain flags, tempo, anything worth remembering…"
-                          rows={2}
-                          className="w-full bg-stone-950 border border-stone-800 rounded px-2.5 py-2 text-sm text-stone-200 placeholder-stone-700 outline-none focus:border-cyan-700 resize-none"
-                        />
-                      </div>
-                    )}
-
-                    {/* History panel: just a recent-3 glance -- full history lives in the Library tab's PR view.
-                        Shared across every day that has an exercise with this same name. */}
-                    {openHistory[ex.id] && (
-                      <div className="px-3.5 pb-3 border-t border-stone-800 pt-2.5">
-                        {mergedHistory.length === 0 ? (
-                          <p className="text-xs text-stone-600">No sessions logged yet.</p>
-                        ) : (
-                          <div className="space-y-1">
-                            {mergedHistory.slice(0, 3).map((h) => {
-                              const fromOtherDay = h.ownerDayId !== activeDay.id;
-                              const ownerDayName = fromOtherDay ? data.days.find((d) => d.id === h.ownerDayId)?.name : null;
-                              return (
-                              <div key={h.id} className="flex items-center gap-2 text-xs group">
-                                <span className="text-stone-500 font-mono shrink-0 w-12">{formatDate(h.date)}</span>
-                                <span className="text-stone-300 font-mono tabular-nums flex-1 min-w-0 truncate">
-                                  {summarizeSets(h.sets)}
-                                  {ownerDayName && <span className="text-stone-600"> · {ownerDayName}</span>}
-                                </span>
-                                <button
-                                  onClick={() => editHistoryEntry(activeDay.id, ex.id, h.ownerDayId, h.ownerExId, h.id)}
-                                  className="text-stone-600 hover:text-cyan-500 shrink-0"
-                                  aria-label={`Edit log from ${formatDate(h.date)}`}
-                                >
-                                  <Pencil className="w-3 h-3" />
-                                </button>
-                                <button
-                                  onClick={() => deleteHistoryEntry(h.ownerDayId, h.ownerExId, h.id, formatDate(h.date))}
-                                  className="text-stone-600 hover:text-red-500 shrink-0"
-                                  aria-label={`Delete log from ${formatDate(h.date)}`}
-                                >
-                                  <Trash2 className="w-3 h-3" />
-                                </button>
-                              </div>
-                              );
-                            })}
-                          </div>
-                        )}
-                        {mergedHistory.length > 3 && (
-                          <button
-                            onClick={() => {
-                              setView('library');
-                              setPrName(ex.name);
-                            }}
-                            className="text-[11px] text-cyan-600 hover:text-cyan-400 mt-2"
-                          >
-                            See all {mergedHistory.length} sessions & PR →
-                          </button>
-                        )}
-                      </div>
-                    )}
-
-                    {/* Footer: log session, which becomes an Edit button right after logging */}
-                    <div className="flex items-center justify-between px-3.5 py-2.5 bg-stone-950 border-t border-stone-800">
-                      <span className="text-[11px] text-stone-600">
-                        {data.program.skippedIds.includes(ex.id)
-                          ? 'Skipped this round'
-                          : mergedHistory.length > 0
-                          ? `Last logged ${formatDate(mergedHistory[0].date)}`
-                          : 'Not logged yet'}
-                      </span>
-                      <div className="flex items-center gap-2">
-                        <button onClick={() => clearSets(activeDay.id, ex.id)} className="text-[11px] text-stone-600 hover:text-stone-400">
-                          Clear
-                        </button>
-                        <button
-                          onClick={() => skipExercise(activeDay.id, ex.id)}
-                          className={`text-[11px] ${
-                            data.program.skippedIds.includes(ex.id) ? 'text-cyan-500 hover:text-cyan-400' : 'text-stone-600 hover:text-stone-400'
-                          }`}
-                        >
-                          {data.program.skippedIds.includes(ex.id) ? 'Undo skip' : 'Skip'}
-                        </button>
-                        {(() => {
-                          const isEditable = justLoggedKeys.has(`${activeDay.id}:${ex.id}`);
-                          return (
-                            <button
-                              onClick={() =>
-                                isEditable
-                                  ? editHistoryEntry(activeDay.id, ex.id, activeDay.id, ex.id, ex.history[0]?.id)
-                                  : logSession(activeDay.id, ex.id)
-                              }
-                              className={`flex items-center gap-1 text-xs font-bold px-2.5 py-1.5 rounded ${
-                                isEditable
-                                  ? 'bg-stone-800 text-stone-300 hover:bg-stone-700'
-                                  : 'bg-cyan-600 text-stone-950 hover:bg-cyan-500'
-                              }`}
-                            >
-                              {isEditable ? (
-                                <>
-                                  <Pencil className="w-3.5 h-3.5" /> Edit
-                                </>
-                              ) : (
-                                'Log session'
-                              )}
-                            </button>
-                          );
-                        })()}
-                      </div>
-                    </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-
-              {/* Complete-day banner: shows once every exercise here is logged, and this day
-                  is part of a multi-day active program -- offers to jump to what's next. */}
-              {activeDay &&
-                data.program.order.length > 1 &&
-                data.program.order.includes(activeDay.id) &&
-                dayIsComplete(activeDay, data.program.loggedIds, data.program.skippedIds) &&
-                (() => {
-                  const idx = data.program.order.indexOf(activeDay.id);
-                  const nextId = data.program.order[(idx + 1) % data.program.order.length];
-                  const nextDay = data.days.find((d) => d.id === nextId);
-                  return (
-                    <div className="flex items-center justify-between gap-3 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-4 py-3">
-                      <span className="flex items-center gap-1.5 text-sm font-bold text-emerald-300">
-                        <Check className="w-4 h-4" /> Day complete!
-                      </span>
-                      {nextDay && (
-                        <button
-                          onClick={() => advanceToNextDay(activeDay.id)}
-                          className="flex items-center gap-1 px-3 py-1.5 rounded-md bg-emerald-600 text-stone-950 text-xs font-bold hover:bg-emerald-500 whitespace-nowrap"
-                        >
-                          Next: {nextDay.name} →
-                        </button>
-                      )}
-                    </div>
-                  );
-                })()}
-
-              {/* Add exercise */}
-              {activeDay && (
-                <div>
-                  {addingExerciseFor === activeDay.id ? (
-                    <div className="bg-stone-900 rounded-lg border border-stone-800 px-3 py-2.5">
-                      <ExercisePicker
-                        library={data.library}
-                        initialValue=""
-                        placeholder="Search your library"
-                        onChoose={(name) => addExercise(activeDay.id, name)}
-                        onCancel={() => setAddingExerciseFor(null)}
-                        onGoToLibrary={() => {
-                          setAddingExerciseFor(null);
-                          setView('library');
-                        }}
-                      />
-                    </div>
-                  ) : (
-                    <button
-                      onClick={() => setAddingExerciseFor(activeDay.id)}
-                      className="w-full flex items-center justify-center gap-1.5 py-2.5 rounded-lg border border-dashed border-stone-800 text-stone-500 text-sm hover:border-stone-700 hover:text-stone-300"
-                    >
-                      <Plus className="w-4 h-4" /> Add exercise
-                    </button>
-                  )}
-                </div>
-              )}
-            </div>
-          </>
-        )}
-      </div>
-
-      {confirm && (
-        <div
-          className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 px-4"
-          onClick={() => setConfirm(null)}
-        >
-          <div
-            className="bg-stone-900 border border-stone-700 rounded-lg p-4 max-w-sm w-full"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <p className="text-sm text-stone-200 mb-4">{confirm.message}</p>
-            <div className="flex justify-end gap-2">
-              <button
-                onClick={() => setConfirm(null)}
-                className="px-3 py-1.5 rounded text-sm text-stone-400 hover:text-stone-200"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={() => {
-                  confirm.onConfirm();
-                  setConfirm(null);
-                }}
-                className={`px-3 py-1.5 rounded text-sm font-bold text-stone-950 ${
-                  confirm.confirmLabel === 'Archive' || confirm.confirmLabel === 'Reset' || confirm.confirmLabel === 'Remove'
-                    ? 'bg-cyan-600 hover:bg-cyan-500'
-                    : 'bg-red-600 hover:bg-red-500'
-                }`}
-              >
-                {confirm.confirmLabel || 'Delete'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {prName && (
-        <PRModal
-          name={prName}
-          stats={getExerciseStats(data.days, prName)}
-          archivedMatches={getArchivedMatches(data.days, prName)}
-          fullHistory={getFullHistory(data.days, prName)}
-          onClose={() => setPrName(null)}
-          onRestore={restoreExercise}
-          onDeleteArchived={(dayId, exId, exName) => {
-            setPrName(null); // close so the confirm dialog isn't hidden behind this one
-            deleteArchived(dayId, exId, exName);
-          }}
-        />
-      )}
-
-      {flexPrName && (
-        <StretchPRModal
-          name={flexPrName}
-          stats={getStretchStats(data.flexDays, flexPrName)}
-          archivedMatches={getArchivedMatches(data.flexDays, flexPrName)}
-          fullHistory={getFullHistory(data.flexDays, flexPrName)}
-          onClose={() => setFlexPrName(null)}
-          onRestore={restoreFlexExercise}
-          onDeleteArchived={(dayId, exId, exName) => {
-            setFlexPrName(null);
-            deleteFlexArchived(dayId, exId, exName);
-          }}
-        />
-      )}
-
-      {toast && (
-        <div
-          className={`fixed bottom-6 left-1/2 -translate-x-1/2 z-50 text-sm font-bold px-4 py-2 rounded-full shadow-lg whitespace-nowrap ${
-            toast.tone === 'error' ? 'bg-red-600 text-stone-50' : 'bg-emerald-600 text-stone-950'
-          }`}
-        >
-          {toast.message}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function PRModal({ name, stats, archivedMatches, fullHistory, onClose, onRestore, onDeleteArchived }) {
-  return (
-    <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 px-4" onClick={onClose}>
-      <div
-        className="bg-stone-900 border border-stone-700 rounded-lg p-5 max-w-sm w-full max-h-[85vh] overflow-y-auto"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-start justify-between mb-4">
-          <div className="flex items-center gap-2">
-            <Trophy className="w-4 h-4 text-amber-500" />
-            <h3 className="text-base font-bold text-stone-100">{name}</h3>
-          </div>
-          <button onClick={onClose} className="text-stone-500 hover:text-stone-300" aria-label="Close">
-            <X className="w-5 h-5" />
-          </button>
-        </div>
-
-        {stats.sessions === 0 ? (
-          <p className="text-sm text-stone-500">No sessions logged for this exercise yet.</p>
-        ) : (
-          <div className="space-y-3">
-            <div className="bg-stone-950 rounded-md p-3 border border-stone-800">
-              <p className="text-[11px] uppercase tracking-wide text-stone-500 mb-1">Heaviest set</p>
-              <p className="text-2xl font-black text-amber-500 font-mono tabular-nums">
-                {stats.bestWeightSet.weight} × {stats.bestWeightSet.reps}
-              </p>
-              <p className="text-[11px] text-stone-600 mt-0.5">{formatDate(stats.bestWeightSet.date)}</p>
-            </div>
-            <div className="bg-stone-950 rounded-md p-3 border border-stone-800">
-              <p className="text-[11px] uppercase tracking-wide text-stone-500 mb-1">Best estimated 1RM</p>
-              <p className="text-2xl font-black text-cyan-500 font-mono tabular-nums">
-                {Math.round(stats.bestEst1RM.value)}
-              </p>
-              <p className="text-[11px] text-stone-600 mt-0.5">
-                from {stats.bestEst1RM.weight} × {stats.bestEst1RM.reps} on {formatDate(stats.bestEst1RM.date)}
-              </p>
-            </div>
-            <p className="text-[11px] text-stone-600">
-              {stats.sessions} session{stats.sessions > 1 ? 's' : ''} logged · last on {formatDate(stats.lastDate)}
-            </p>
-          </div>
-        )}
-
-        {fullHistory.length > 0 && (
-          <div className="mt-4 pt-4 border-t border-stone-800">
-            <p className="flex items-center gap-1.5 text-[11px] uppercase tracking-wide text-stone-500 mb-2">
-              <HistoryIcon className="w-3 h-3" /> Full history ({fullHistory.length})
-            </p>
-            <div className="space-y-1 max-h-48 overflow-y-auto pr-1">
-              {fullHistory.map((h) => (
-                <div key={h.id} className="flex items-baseline gap-2 text-xs">
-                  <span className="text-stone-500 font-mono shrink-0 w-12">{formatDate(h.date)}</span>
-                  <span className="text-stone-300 font-mono tabular-nums">{summarizeSets(h.sets)}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {archivedMatches.length > 0 && (
-          <div className="mt-4 pt-4 border-t border-stone-800">
-            <p className="flex items-center gap-1.5 text-[11px] uppercase tracking-wide text-stone-500 mb-2">
-              <ArchiveIcon className="w-3 h-3" /> Archived ({archivedMatches.length})
-            </p>
-            <div className="space-y-2">
-              {archivedMatches.map(({ dayId, dayName, ex }) => (
-                <div key={ex.id} className="bg-stone-950 rounded-md border border-dashed border-stone-800 px-3 py-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs text-stone-400">{dayName}</span>
-                    <div className="flex items-center gap-3">
-                      <button
-                        onClick={() => onRestore(dayId, ex.id)}
-                        className="flex items-center gap-1 text-xs text-cyan-600 hover:text-cyan-400"
-                      >
-                        <Undo2 className="w-3.5 h-3.5" /> Restore
-                      </button>
-                      <button
-                        onClick={() => onDeleteArchived(dayId, ex.id, ex.name)}
-                        className="text-stone-600 hover:text-red-500"
-                        aria-label={`Permanently delete archived ${ex.name} from ${dayName}`}
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  </div>
-                  <p className="text-[11px] text-stone-600 mt-1">
-                    {ex.history.length > 0
-                      ? `${ex.history.length} session${ex.history.length > 1 ? 's' : ''} kept · last ${formatDate(ex.history[0].date)}`
-                      : 'No sessions were logged before this was archived'}
-                  </p>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// Search-and-select from the library. Selection only — new exercises are added via the Library tab.
-function StretchPRModal({ name, stats, archivedMatches, fullHistory, onClose, onRestore, onDeleteArchived }) {
-  return (
-    <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 px-4" onClick={onClose}>
-      <div
-        className="bg-stone-900 border border-stone-700 rounded-lg p-5 max-w-sm w-full max-h-[85vh] overflow-y-auto"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-start justify-between mb-4">
-          <div className="flex items-center gap-2">
-            <Trophy className="w-4 h-4 text-violet-300" />
-            <h3 className="text-base font-bold text-stone-100">{name}</h3>
-          </div>
-          <button onClick={onClose} className="text-stone-500 hover:text-stone-300" aria-label="Close">
-            <X className="w-5 h-5" />
-          </button>
-        </div>
-
-        {stats.sessions === 0 ? (
-          <p className="text-sm text-stone-500">No sessions logged for this stretch yet.</p>
-        ) : (
-          <div className="space-y-3">
-            <div className="bg-stone-950 rounded-md p-3 border border-stone-800">
-              <p className="text-[11px] uppercase tracking-wide text-stone-500 mb-1">Longest session</p>
-              <p className="text-2xl font-black text-violet-300 font-mono tabular-nums">
-                {stats.longestSession} × {STRETCH_HOLD_SECONDS}s
-              </p>
-              <p className="text-[11px] text-stone-600 mt-0.5">holds in a single session</p>
-            </div>
-            <p className="text-[11px] text-stone-600">
-              {stats.sessions} session{stats.sessions > 1 ? 's' : ''} logged · last on {formatDate(stats.lastDate)}
-            </p>
-          </div>
-        )}
-
-        {fullHistory.length > 0 && (
-          <div className="mt-4 pt-4 border-t border-stone-800">
-            <p className="flex items-center gap-1.5 text-[11px] uppercase tracking-wide text-stone-500 mb-2">
-              <HistoryIcon className="w-3 h-3" /> Full history ({fullHistory.length})
-            </p>
-            <div className="space-y-1 max-h-48 overflow-y-auto pr-1">
-              {fullHistory.map((h) => (
-                <div key={h.id} className="flex items-baseline gap-2 text-xs">
-                  <span className="text-stone-500 font-mono shrink-0 w-12">{formatDate(h.date)}</span>
-                  <span className="text-stone-300 font-mono tabular-nums">{summarizeStretchSets(h.sets)}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {archivedMatches.length > 0 && (
-          <div className="mt-4 pt-4 border-t border-stone-800">
-            <p className="flex items-center gap-1.5 text-[11px] uppercase tracking-wide text-stone-500 mb-2">
-              <ArchiveIcon className="w-3 h-3" /> Archived ({archivedMatches.length})
-            </p>
-            <div className="space-y-2">
-              {archivedMatches.map(({ dayId, dayName, ex }) => (
-                <div key={ex.id} className="bg-stone-950 rounded-md border border-dashed border-stone-800 px-3 py-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs text-stone-400">{dayName}</span>
-                    <div className="flex items-center gap-3">
-                      <button
-                        onClick={() => onRestore(dayId, ex.id)}
-                        className="flex items-center gap-1 text-xs text-violet-400 hover:text-violet-300"
-                      >
-                        <Undo2 className="w-3.5 h-3.5" /> Restore
-                      </button>
-                      <button
-                        onClick={() => onDeleteArchived(dayId, ex.id, ex.name)}
-                        className="text-stone-600 hover:text-red-500"
-                        aria-label={`Permanently delete archived ${ex.name} from ${dayName}`}
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  </div>
-                  <p className="text-[11px] text-stone-600 mt-1">
-                    {ex.history.length > 0
-                      ? `${ex.history.length} session${ex.history.length > 1 ? 's' : ''} kept · last ${formatDate(ex.history[0].date)}`
-                      : 'No sessions were logged before this was archived'}
-                  </p>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// Two-step picker: choose a muscle group first (colored chips), then search/select within it.
-function ExercisePicker({
-  library,
-  initialValue = '',
-  onChoose,
-  onCancel,
-  placeholder,
-  onGoToLibrary,
-  categories = MUSCLE_GROUPS,
-  colorFn = groupColor,
-  categoryField = 'muscleGroup',
-  libraryTabLabel = 'Library',
-}) {
-  const [group, setGroup] = useState(null); // null = still choosing a category
-  const [query, setQuery] = useState(initialValue);
-
-  const groupsWithItems = categories.filter((g) => library.some((l) => (l[categoryField] || 'Other') === g));
-
-  // Step 1: pick a category to narrow the list
-  if (group === null) {
-    return (
-      <div>
-        <p className="text-xs text-stone-500 mb-2">{categoryField === 'area' ? 'Pick a body area' : 'Pick a muscle group'}</p>
-        <div className="flex flex-wrap gap-1.5">
-          {groupsWithItems.map((g) => {
-            const gc = colorFn(g);
-            return (
-              <button
-                key={g}
-                onClick={() => setGroup(g)}
-                className={`px-2.5 py-1.5 rounded-md text-xs font-bold border ${gc.bg} ${gc.text} ${gc.border} hover:brightness-125`}
-              >
-                {g}
-              </button>
-            );
-          })}
-          <button
-            onClick={() => setGroup('All')}
-            className="px-2.5 py-1.5 rounded-md text-xs font-bold border bg-stone-800 text-stone-400 border-stone-700 hover:text-stone-200"
-          >
-            All exercises
-          </button>
-        </div>
-        <button onClick={onCancel} className="text-xs text-stone-600 hover:text-stone-400 mt-2">
-          Cancel
-        </button>
-      </div>
-    );
-  }
-
-  // Step 2: search/select within the chosen category
-  const q = query.trim().toLowerCase();
-  const filtered = library
-    .filter((l) => group === 'All' || (l[categoryField] || 'Other') === group)
-    .filter((l) => !q || l.name.toLowerCase().includes(q));
-  const gc = group !== 'All' ? colorFn(group) : null;
-
-  const choose = (name) => onChoose(name);
-
-  return (
-    <div>
-      <button onClick={() => setGroup(null)} className="text-xs text-stone-500 hover:text-stone-300 mb-1.5">
-        ← {group === 'All' ? 'All exercises' : group}
-      </button>
-      <div className="flex items-center gap-1.5">
-        <input
-          autoFocus
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && filtered.length === 1) choose(filtered[0].name);
-            if (e.key === 'Escape') onCancel();
-          }}
-          placeholder={placeholder || `Search ${group === 'All' ? 'your library' : group.toLowerCase()}`}
-          className={`flex-1 bg-stone-950 border rounded px-2 py-1.5 text-sm text-stone-100 placeholder-stone-600 outline-none ${
-            gc ? gc.border : 'border-cyan-700'
-          }`}
-        />
-        <button onClick={onCancel} className="text-stone-600 hover:text-stone-400" aria-label="Cancel">
-          <X className="w-4 h-4" />
-        </button>
-      </div>
-      <div className="max-h-36 overflow-y-auto space-y-0.5 mt-1.5">
-        {filtered.length === 0 ? (
-          <div className="px-2 py-1.5">
-            <p className="text-xs text-stone-600">No matches{group !== 'All' ? ` in ${group}` : ''}.</p>
-            {onGoToLibrary && (
-              <button onClick={() => onGoToLibrary(query)} className="text-xs text-cyan-500 hover:text-cyan-400 mt-1">
-                Add "{query.trim() || 'it'}" from the {libraryTabLabel} tab
-              </button>
-            )}
-          </div>
-        ) : (
-          filtered.map((l) => {
-            const rowGc = colorFn(l[categoryField] || 'Other');
-            return (
-              <button
-                key={l.id}
-                onClick={() => choose(l.name)}
-                className="w-full flex items-center gap-2 px-2 py-1 rounded text-sm text-stone-300 hover:bg-stone-800"
-              >
-                <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${rowGc.dot}`} />
-                <MarqueeText text={l.name} className="flex-1 min-w-0 text-left" />
-                {group === 'All' && (
-                  <span className={`text-[10px] uppercase tracking-wide shrink-0 ${rowGc.text}`}>{l[categoryField] || 'Other'}</span>
-                )}
-              </button>
-            );
-          })
-        )}
-      </div>
-    </div>
-  );
-}
-
-function LibraryView({
-  library,
-  onAdd,
-  onRemove,
-  onSelect,
-  onUpdateGroup,
-  onExport,
-  onImportParsed,
-  onImportError,
-  categories = MUSCLE_GROUPS,
-  colorFn = groupColor,
-  categoryField = 'muscleGroup',
-  accent = 'cyan',
-  itemLabel = 'exercise',
-  showBackup = false,
-}) {
-  const [newName, setNewName] = useState('');
-  const [newGroup, setNewGroup] = useState(categories[0]);
-  const [search, setSearch] = useState('');
-  const fileInputRef = useRef(null);
-  const accentBtn = accent === 'violet' ? 'bg-violet-400 hover:bg-violet-300' : 'bg-cyan-600 hover:bg-cyan-500';
-  const accentFocus = accent === 'violet' ? 'focus:border-violet-400' : 'focus:border-cyan-700';
-
-  const submit = () => {
-    if (newName.trim()) {
-      onAdd(newName, newGroup);
-      setNewName('');
-    }
-  };
-
-  const handleImportClick = () => fileInputRef.current?.click();
-
-  const handleFileChosen = (e) => {
-    const file = e.target.files && e.target.files[0];
-    e.target.value = ''; // allow choosing the same file again later
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      try {
-        const parsed = JSON.parse(reader.result);
-        onImportParsed(parsed);
-      } catch (err) {
-        onImportError("That file doesn't look like a valid backup");
-      }
-    };
-    reader.onerror = () => onImportError("Couldn't read that file");
-    reader.readAsText(file);
-  };
-
-  const searched = search.trim()
-    ? library.filter((l) => l.name.toLowerCase().includes(search.trim().toLowerCase()))
-    : library;
-
-  const grouped = categories
-    .map((group) => ({
-      group,
-      items: searched.filter((l) => (l[categoryField] || 'Other') === group).sort((a, b) => a.name.localeCompare(b.name)),
-    }))
-    .filter((g) => g.items.length > 0);
-
-  return (
-    <div>
-      {/* Search existing items */}
-      <div className="relative mb-3">
-        <Search className="w-4 h-4 text-stone-600 absolute left-2.5 top-1/2 -translate-y-1/2" />
-        <input
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder={`Search your ${itemLabel === 'stretch' ? 'stretches' : 'library'}`}
-          className={`w-full bg-stone-900 border border-stone-800 rounded px-3 py-2 pl-8 text-sm text-stone-100 placeholder-stone-600 outline-none ${accentFocus}`}
-        />
-      </div>
-
-      {/* Add a new item */}
-      <div className="flex items-center gap-1.5 mb-4">
-        <input
-          value={newName}
-          onChange={(e) => setNewName(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') submit();
-          }}
-          placeholder={`Add a ${itemLabel} to your library`}
-          className={`flex-1 bg-stone-900 border border-stone-800 rounded px-3 py-2 text-sm text-stone-100 placeholder-stone-600 outline-none ${accentFocus}`}
-        />
-        <select
-          value={newGroup}
-          onChange={(e) => setNewGroup(e.target.value)}
-          className={`bg-stone-900 border border-stone-800 rounded px-2 py-2 text-sm text-stone-300 outline-none ${accentFocus}`}
-        >
-          {categories.map((g) => (
-            <option key={g} value={g}>
-              {g}
-            </option>
-          ))}
-        </select>
-        <button onClick={submit} className={`px-3 py-2 rounded text-stone-950 text-sm font-bold ${accentBtn}`}>
-          Add
-        </button>
-      </div>
-
-      {grouped.length === 0 ? (
-        <p className="text-center text-stone-600 text-sm py-8">
-          {search.trim()
-            ? `No ${itemLabel === 'stretch' ? 'stretches' : 'exercises'} match "${search.trim()}".`
-            : `Your library is empty. Add ${itemLabel === 'stretch' ? 'stretches' : 'exercises'} above so they're ready to pick from in the log.`}
-        </p>
-      ) : (
-        <div className="space-y-4">
-          {grouped.map(({ group, items }) => {
-            const gc = colorFn(group);
-            return (
-              <div key={group}>
-                <p className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide text-stone-500 mb-1.5">
-                  <span className={`w-2 h-2 rounded-full ${gc.dot}`} />
-                  {group} <span className="text-stone-700">({items.length})</span>
-                </p>
-                <div className="space-y-1">
-                  {items.map((l) => (
-                    <div
-                      key={l.id}
-                      className={`flex items-center justify-between bg-stone-900 rounded-md px-3 py-2 border border-stone-800 ${gc.left} border-l-4 hover:border-stone-700 cursor-pointer`}
-                      onClick={() => onSelect(l.name)}
-                    >
-                      <span className="flex items-center gap-2 text-sm text-stone-200 min-w-0">
-                        <Trophy className="w-3.5 h-3.5 text-stone-600 shrink-0" />
-                        <MarqueeText text={l.name} className="min-w-0" />
-                      </span>
-                      <div className="flex items-center gap-2 shrink-0" onClick={(e) => e.stopPropagation()}>
-                        <select
-                          value={l[categoryField] || 'Other'}
-                          onChange={(e) => onUpdateGroup(l.id, e.target.value)}
-                          aria-label={`Category for ${l.name}`}
-                          className={`bg-stone-950 border border-stone-800 rounded px-1.5 py-1 text-xs text-stone-400 outline-none ${accentFocus}`}
-                        >
-                          {categories.map((g) => (
-                            <option key={g} value={g}>
-                              {g}
-                            </option>
-                          ))}
-                        </select>
-                        <button onClick={() => onRemove(l.id, l.name)} className="text-stone-600 hover:text-red-500" aria-label={`Remove ${l.name} from library`}>
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-      <p className="text-[11px] text-stone-600 mt-4">
-        Tap {itemLabel === 'stretch' ? 'a stretch' : 'an exercise'} to see your PR. Removing one here only removes it from the picker — any logs already recorded under that name stay untouched.
-      </p>
-
-      {/* Backup / restore everything: covers both strength and flexibility data at once */}
-      {showBackup && (
-        <div className="mt-6 pt-4 border-t border-stone-800">
-          <p className="text-[11px] font-bold uppercase tracking-wide text-stone-500 mb-2">Backup</p>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={onExport}
-              className="flex items-center gap-1.5 flex-1 justify-center px-3 py-2 rounded-md border border-stone-800 text-sm text-stone-300 hover:border-stone-700 hover:text-stone-100"
-            >
-              <Download className="w-3.5 h-3.5" /> Save my data
-            </button>
-            <button
-              onClick={handleImportClick}
-              className="flex items-center gap-1.5 flex-1 justify-center px-3 py-2 rounded-md border border-stone-800 text-sm text-stone-300 hover:border-stone-700 hover:text-stone-100"
-            >
-              <Upload className="w-3.5 h-3.5" /> Restore
-            </button>
-            <input ref={fileInputRef} type="file" accept="application/json" onChange={handleFileChosen} className="hidden" />
-          </div>
-          <p className="text-[11px] text-stone-600 mt-2">
-            Downloads everything — strength and flexibility sessions, libraries, and programs — as a file you can keep safe or move to another device.
-          </p>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// Slowly scrolls text sideways only when it's actually too wide for its container --
-// short names just sit still. Used anywhere an exercise name might get clipped on mobile.
-function MarqueeText({ text, className = '' }) {
-  const containerRef = useRef(null);
-  const measureRef = useRef(null);
-  const [needsScroll, setNeedsScroll] = useState(false);
-  const [duration, setDuration] = useState(8);
-
-  useEffect(() => {
-    const check = () => {
-      if (!containerRef.current || !measureRef.current) return;
-      const overflow = measureRef.current.scrollWidth > containerRef.current.clientWidth + 1;
-      setNeedsScroll(overflow);
-      if (overflow) {
-        // Slow, roughly constant speed regardless of name length (~22px/sec).
-        setDuration(Math.max(6, measureRef.current.scrollWidth / 22));
-      }
-    };
-    check();
-    window.addEventListener('resize', check);
-    return () => window.removeEventListener('resize', check);
-  }, [text]);
-
-  return (
-    <span ref={containerRef} className={`relative inline-block overflow-hidden align-bottom max-w-full ${className}`}>
-      {/* Hidden measuring copy: always static, used only to detect overflow width */}
-      <span ref={measureRef} className="invisible absolute whitespace-nowrap pointer-events-none">
-        {text}
-      </span>
-      {needsScroll ? (
-        <span className="inline-flex whitespace-nowrap" style={{ animation: `marquee-scroll ${duration}s linear infinite` }}>
-          <span className="pr-10">{text}</span>
-          <span className="pr-10" aria-hidden="true">
-            {text}
-          </span>
-        </span>
-      ) : (
-        <span className="whitespace-nowrap">{text}</span>
-      )}
-    </span>
-  );
-}
-
-function IconButton({ children, onClick, label, active, dot, danger }) {
-  return (
-    <button
-      onClick={onClick}
-      aria-label={label}
-      title={label}
-      className={`relative w-7 h-7 flex items-center justify-center rounded transition-colors ${
-        active
-          ? 'bg-cyan-600 text-stone-950'
-          : danger
-          ? 'text-stone-600 hover:text-red-500'
-          : 'text-stone-500 hover:text-stone-200 hover:bg-stone-800'
-      }`}
-    >
-      {children}
-      {dot && !active && <span className="absolute top-0.5 right-0.5 w-1.5 h-1.5 rounded-full bg-amber-500" />}
-    </button>
-  );
-}
-
-function SaveIndicator({ state }) {
-  if (state === 'saving') {
-    return (
-      <div className="flex items-center gap-1 text-stone-600 text-[11px]">
-        <Loader2 className="w-3 h-3 animate-spin" /> Saving
-      </div>
-    );
-  }
-  if (state === 'error') {
-    return (
-      <div className="flex items-center gap-1 text-red-500 text-[11px]" title="Changes may not persist">
-        <CircleAlert className="w-3 h-3" /> Not saved
-      </div>
-    );
-  }
-  if (state === 'saved') {
-    return (
-      <div className="flex items-center gap-1 text-stone-600 text-[11px]">
-        <Check className="w-3 h-3" /> Saved
-      </div>
-    );
-  }
-  return null;
-}
-
-ReactDOM.createRoot(document.getElementById('root')).render(<ExerciseTracker />);
-
+});
 </script>
 
 <script>
-  (function () {
-    var source = document.getElementById('app-source').textContent;
-    var output = Babel.transform(source, {
-      presets: [["react", { runtime: "classic" }]],
-      filename: "app.jsx",
-    }).code;
-    (0, eval)(output);
-  })();
+/* ============================================================
+   MEAL PLAN TAB
+   ============================================================ */
+(function () {
+  const meals = [
+    {
+      id: "m2",
+      days: "Mon · Thu · Sat",
+      name: "Creamy pickled beef bowl (350g beef)",
+      ingredients: [
+        "300g cucumber, sliced",
+        "30g red onion, sliced",
+        "15g jalapeño, sliced",
+        "30g rice vinegar",
+        "15g white vinegar",
+        "15g lime juice (~1/2 lime)",
+        "5g pickle juice",
+        "350g extra lean ground beef (96/4)",
+        "10g soy sauce",
+        "45g nonfat Greek yogurt",
+        "5g yellow mustard",
+        "15g sugar-free BBQ sauce (Walden Farms)",
+        "Salt, pepper, garlic powder, smoked paprika"
+      ],
+      steps: [
+        "In a large container, combine the sliced cucumber, red onion, and jalapeño with the rice vinegar, white vinegar, lime juice, salt, and pickle juice. Mix well and let sit 15–30 minutes to quick-pickle.",
+        "In a pan over medium-high heat, cook the ground beef with the seasonings until browned, then stir in the soy sauce to coat. Let it cool slightly.",
+        "Once the cucumbers have softened, mix the Greek yogurt, mustard, and BBQ sauce into the container until the vegetables are coated.",
+        "Top with the cooked beef or mix it through. Taste and adjust the salt or acid before serving."
+      ],
+      macros: { cal: 521, p: 85, c: 17, f: 16 }
+    },
+    {
+      id: "m3",
+      days: "Tue · Sat",
+      name: "High-protein alfredo with air-fried shrimp",
+      ingredients: [
+        "250g low-fat cottage cheese",
+        "1 packet konjac noodles, rinsed thoroughly",
+        "1 clove garlic, minced",
+        "Onion powder, salt, dried chives",
+        "250g shrimp, peeled and deveined"
+      ],
+      steps: [
+        "Toss the shrimp with a light spray of oil and a pinch of salt/pepper. Air fry at 400°F (200°C) for 6–8 minutes, shaking the basket halfway, until opaque and firm.",
+        "Blend the cottage cheese, garlic, spices, and a splash of water until completely smooth — this is your alfredo sauce.",
+        "Dry-fry the rinsed konjac noodles in a hot pan for a few minutes to cook off excess moisture and the faint fishy smell before saucing.",
+        "Toss the noodles with the sauce over very low heat just to warm through. Don't let it boil, or the sauce can split.",
+        "Top with the air-fried shrimp."
+      ],
+      macros: { cal: 440, p: 90, c: 15, f: 6 }
+    },
+    {
+      id: "mapo",
+      days: "Sun · Wed · Fri",
+      name: "Mapo tofu (turkey, PSMF-adjusted, meal-prep version)",
+      ingredients: [
+        "300g soft or medium-firm tofu (× number of batches you're prepping)",
+        "300g extra lean ground turkey (× batches)",
+        "4 cloves garlic, finely minced (× batches)",
+        "1 red chilli, deseeded and finely diced (× batches)",
+        "1 tbsp ginger, finely minced (× batches)",
+        "4 spring onions, whites and greens separated, finely sliced (× batches)",
+        "1 tbsp doubanjiang (× batches)",
+        "1 tbsp miso, red or white (× batches)",
+        "1 tbsp reduced-sodium soy sauce (× batches)",
+        "1 tbsp sake or mirin (× batches)",
+        "250mL chicken bone broth (× batches)",
+        "A few drops sesame oil, optional (× batches)",
+        "White pepper, salt to taste",
+        "Slurry: 1/2 tsp xanthan gum + 2 tbsp cold water — make fresh each cooking day, doesn't batch well",
+        "Side: 200g Brussels sprouts, halved (× batches)"
+      ],
+      steps: [
+        "PREP AHEAD (do this once for all batches you're making): Mince all the garlic, chilli, ginger, and spring onion whites together in one go — a food processor makes this fast. Store in a container, keeps 4–5 days refrigerated.",
+        "PREP AHEAD: Brown all the ground turkey in one pan session, breaking it up finely. Portion into individual containers and refrigerate.",
+        "PREP AHEAD: Simmer all the tofu in salted water for 3–4 minutes to firm it up, then transfer to a lightly oiled tray. Portion and refrigerate.",
+        "PREP AHEAD: Mix the doubanjiang, miso, soy sauce, and sake/mirin together in one jar at the full batch ratio — this is your sauce base for the week.",
+        "PREP AHEAD: Halve all the Brussels sprouts at once and store in one container, ready for the air fryer.",
+        "COOKING DAY: Reheat one portion of the pre-cooked turkey in a non-stick pan over medium-high heat.",
+        "COOKING DAY: Add a single-batch portion of the aromatics (garlic, chilli, ginger, spring onion whites) plus the sesame oil if using. Sauté 1–2 minutes.",
+        "COOKING DAY: Add a single-batch portion of the sauce base. Sauté 1–2 minutes until fragrant.",
+        "COOKING DAY: Add the chicken bone broth, simmer on medium-low for 10 minutes.",
+        "COOKING DAY: Whisk a fresh slurry (xanthan gum + cold water) and stir it in gradually while stirring the broth continuously, until it coats a spoon nicely.",
+        "COOKING DAY: Gently add one portion of the pre-simmered tofu, swirling the pan (don't stir) to avoid breaking the curds. Add white pepper, simmer 2 more minutes.",
+        "COOKING DAY: Toss the halved Brussels sprouts with a light spray of oil, salt, and pepper. Air fry at 400°F (200°C) for 12–15 minutes, shaking halfway, until the cut edges are charred and crispy.",
+        "COOKING DAY: Slice fresh spring onion greens and soak in ice water for 10 minutes for crunch (this step doesn't batch ahead well). Strain, pat dry, and use as the topping.",
+        "Serve the mapo tofu topped with the crisped spring onion greens, Brussels sprouts on the side."
+      ],
+      macros: { cal: 786, p: 109, c: 41, f: 22 }
+    },
+    {
+      id: "m6",
+      days: "Mon · Wed · Fri",
+      name: "Zucchini noodle bolognese",
+      ingredients: [
+        "2 large zucchinis (~600–650g), spiralized",
+        "300g extra lean ground turkey",
+        "200g tomato purée",
+        "Italian herbs, garlic powder, a pinch of sweetener"
+      ],
+      steps: [
+        "Brown the extra lean ground turkey in a non-stick pan, breaking it up finely.",
+        "Stir in the tomato purée and herbs; simmer until thickened.",
+        "Add the zucchini noodles and toss for just 2 minutes — overcooking releases water and thins out the sauce."
+      ],
+      macros: { cal: 622, p: 105, c: 32, f: 11 }
+    },
+    {
+      id: "m7",
+      days: "Sun",
+      name: "Tuna pancakes",
+      ingredients: [
+        "266g canned tuna in brine, well drained",
+        "144g liquid egg whites",
+        "1/2 onion, finely diced",
+        "Dill and lemon zest"
+      ],
+      steps: [
+        "Mix all the ingredients together in a bowl.",
+        "Heat a non-stick pan and spoon the mixture into small patties.",
+        "Cook about 3 minutes per side until golden brown. Serve with mustard."
+      ],
+      macros: { cal: 349, p: 71, c: 11, f: 1 }
+    },
+    {
+      id: "m9",
+      days: "Wed",
+      name: "Chicken breast pizza bowl",
+      ingredients: [
+        "300g chicken breast, diced",
+        "100g mushrooms",
+        "100g tomato purée",
+        "Oregano, basil, chilli flakes",
+        "Optional: non-fat grated cheese or nutritional yeast"
+      ],
+      steps: [
+        "Cook the chicken and mushrooms together in a pan.",
+        "Pour the tomato purée over top and reduce the heat.",
+        "Sprinkle on the herbs (and optional cheese), then cover with a lid for 2 minutes to steam through."
+      ],
+      macros: { cal: 367, p: 73, c: 5, f: 5 }
+    },
+    {
+      id: "m10",
+      days: "Fri",
+      name: "Shirataki chicken lo mein",
+      ingredients: [
+        "300g chicken breast, sliced thin",
+        "1 packet (200g) shirataki/konjac noodles",
+        "200g bok choy",
+        "1/2 bell pepper",
+        "Sauce: 45mL reduced-sodium soy sauce, 15mL rice vinegar, 5g garlic, 5g ginger, 4g erythritol/stevia, 2g chilli flakes"
+      ],
+      steps: [
+        "Rinse the noodles thoroughly under cold water for about a minute.",
+        "Dry-fry them in a hot, oil-free pan for 5–7 minutes until they squeak and the moisture has cooked off — this step is what fixes the texture.",
+        "In the same pan, brown the chicken slices.",
+        "Add the vegetables with a splash of water to steam slightly.",
+        "Toss the noodles back in, pour over the sauce, and stir-fry for about 2 minutes until everything is coated."
+      ],
+      macros: { cal: 443, p: 79, c: 19, f: 7 }
+    },
+    {
+      id: "shake",
+      days: "Daily",
+      name: "Vanilla-cinnamon casein shake (2 scoops, fixed)",
+      ingredients: [
+        "2 scoops (~60g) casein protein powder",
+        "~250mL cold water",
+        "4–5 ice cubes",
+        "1/2 tsp vanilla extract",
+        "Cinnamon, to taste",
+        "Pinch of xanthan gum, optional (for a thicker texture)"
+      ],
+      steps: [
+        "Add all ingredients to a blender.",
+        "Blend for 20–30 seconds until smooth and thick, like a milkshake — this is what fixes casein's usual gritty texture, not just shaking it in a bottle.",
+        "Drink right away."
+      ],
+      macros: { cal: 240, p: 48, c: 6, f: 2 }
+    }
+  ];
+
+  const mealsById = {};
+  meals.forEach(m => mealsById[m.id] = m);
+
+  // day -> [meal1 id, meal2 id]; shake is implicit every day
+  const schedule = [
+    { day: "Sun", ids: ["mapo", "m7"] },
+    { day: "Mon", ids: ["m3", "m6"] },
+    { day: "Tue", ids: ["m9", "m2"] },
+    { day: "Wed", ids: ["m10", "mapo"] },
+    { day: "Thu", ids: ["m6", "m2"] },
+    { day: "Fri", ids: ["mapo", "m3"] },
+    { day: "Sat", ids: ["m6", "m2"] }
+  ];
+
+  function renderSchedule() {
+    const body = document.getElementById("scheduleBody");
+    body.innerHTML = "";
+    schedule.forEach(row => {
+      const tr = document.createElement("tr");
+      const m1 = mealsById[row.ids[0]];
+      const m2 = mealsById[row.ids[1]];
+      const shake = mealsById["shake"];
+      tr.innerHTML = `
+        <td class="day-col">${row.day}</td>
+        <td class="meal-cell" data-id="${m1.id}">${m1.name.split(" (")[0]} (${m1.macros.p}g)</td>
+        <td class="meal-cell" data-id="${m2.id}">${m2.name.split(" (")[0]} (${m2.macros.p}g)</td>
+        <td class="meal-cell" data-id="shake">${shake.macros.p}g</td>
+      `;
+      body.appendChild(tr);
+      tr.querySelectorAll(".meal-cell").forEach(cell => {
+        cell.addEventListener("click", () => openSheet(mealsById[cell.dataset.id]));
+      });
+    });
+  }
+
+  function renderMacros() {
+    const body = document.getElementById("macrosBody");
+    body.innerHTML = "";
+    let totals = { cal: 0, p: 0, c: 0, f: 0 };
+    schedule.forEach(row => {
+      const m1 = mealsById[row.ids[0]].macros;
+      const m2 = mealsById[row.ids[1]].macros;
+      const shake = mealsById["shake"].macros;
+      const day = {
+        cal: m1.cal + m2.cal + shake.cal,
+        p: m1.p + m2.p + shake.p,
+        c: m1.c + m2.c + shake.c,
+        f: m1.f + m2.f + shake.f
+      };
+      totals.cal += day.cal; totals.p += day.p; totals.c += day.c; totals.f += day.f;
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td class="day-col">${row.day}</td>
+        <td class="num">${day.cal.toLocaleString()}</td>
+        <td class="num">${day.p}g</td>
+        <td class="num">${day.c}g</td>
+        <td class="num">${day.f}g</td>
+      `;
+      body.appendChild(tr);
+    });
+    const avgRow = document.createElement("tr");
+    avgRow.className = "avg-row";
+    avgRow.innerHTML = `
+      <td class="day-col">Avg</td>
+      <td class="num">${Math.round(totals.cal / 7).toLocaleString()}</td>
+      <td class="num">${Math.round(totals.p / 7)}g</td>
+      <td class="num">${Math.round(totals.c / 7)}g</td>
+      <td class="num">${Math.round(totals.f / 7)}g</td>
+    `;
+    body.appendChild(avgRow);
+  }
+
+  function openSheet(m) {
+    const content = document.getElementById("sheetContent");
+    content.innerHTML = `
+      <div class="sheet-days">${m.days}</div>
+      <p class="sheet-title">${m.name}</p>
+      <h3>Ingredients</h3>
+      <ul>${m.ingredients.map(i => `<li>${i}</li>`).join("")}</ul>
+      <h3>Method</h3>
+      <ol>${m.steps.map(s => `<li>${s}</li>`).join("")}</ol>
+      <h3>Macros</h3>
+      <div class="macro-row">
+        <div class="macro-pill"><div class="val">${m.macros.cal}</div><div class="lbl">Cal</div></div>
+        <div class="macro-pill"><div class="val">${m.macros.p}g</div><div class="lbl">Protein</div></div>
+        <div class="macro-pill"><div class="val">${m.macros.c}g</div><div class="lbl">Carbs</div></div>
+        <div class="macro-pill"><div class="val">${m.macros.f}g</div><div class="lbl">Fat</div></div>
+      </div>
+    `;
+    document.getElementById("overlay").classList.add("open");
+  }
+  function closeSheet() { document.getElementById("overlay").classList.remove("open"); }
+  document.getElementById("closeBtn").addEventListener("click", closeSheet);
+  document.getElementById("overlay").addEventListener("click", (e) => { if (e.target.id === "overlay") closeSheet(); });
+
+  renderSchedule();
+  renderMacros();
+})();
 </script>
+
+<script>
+/* ============================================================
+   FREEZER TAB
+   ============================================================ */
+(function () {
+  const week = [
+    { day: "Sun", meals: "Mapo tofu + Tuna pancakes", thaw: ["Shrimp (250g)", "Ground turkey (300g)"] },
+    { day: "Mon", meals: "Alfredo + shrimp + Bolognese", thaw: ["Chicken breast (300g)", "Ground beef (350g)"] },
+    { day: "Tue", meals: "Chicken pizza bowl + Beef bowl", thaw: ["Chicken breast (300g)", "Ground turkey (300g)"] },
+    { day: "Wed", meals: "Chicken lo mein + Mapo tofu", thaw: ["Ground turkey (300g)", "Ground beef (350g)"] },
+    { day: "Thu", meals: "Bolognese + Beef bowl", thaw: ["Ground turkey (300g)", "Shrimp (250g)"] },
+    { day: "Fri", meals: "Mapo tofu + Alfredo + shrimp", thaw: ["Ground turkey (300g)", "Ground beef (350g)"] },
+    { day: "Sat", meals: "Bolognese + Beef bowl", thaw: ["Ground turkey (300g)"] }
+  ];
+
+  let selected = new Date().getDay();
+
+  function renderGrid() {
+    const grid = document.getElementById("dayGrid");
+    grid.innerHTML = "";
+    week.forEach((d, i) => {
+      const btn = document.createElement("div");
+      btn.className = "day-btn" + (i === selected ? " active" : "");
+      btn.textContent = d.day;
+      btn.addEventListener("click", () => { selected = i; renderGrid(); renderResult(); });
+      grid.appendChild(btn);
+    });
+  }
+
+  function renderResult() {
+    const today = week[selected];
+    const tomorrow = week[(selected + 1) % 7];
+    const box = document.getElementById("freezerResult");
+    let thawHtml;
+    if (today.thaw.length === 0) {
+      thawHtml = `<div class="empty-note">Nothing needs thawing — tomorrow's meal (${tomorrow.meals}) uses only pantry/fresh items.</div>`;
+    } else {
+      thawHtml = today.thaw.map(item => `<div class="thaw-item">${item}</div>`).join("");
+    }
+    box.innerHTML = `
+      <h3>Today — ${today.day}</h3>
+      <div class="today-meals">${today.meals}</div>
+      <div class="thaw-box">
+        <div class="tomorrow-label">Move to fridge tonight (for ${tomorrow.day})</div>
+        ${thawHtml}
+      </div>
+    `;
+  }
+
+  renderGrid();
+  renderResult();
+})();
+</script>
+
+<script>
+/* ============================================================
+   GROCERY TAB
+   ============================================================ */
+(function () {
+  const sections = [
+    {
+      title: "Proteins",
+      items: [
+        "Extra lean ground beef (96%+) — ~1.05kg (3 × 350g portions)",
+        "Chicken breast — ~600g total (2 medium breasts: 1 for pizza bowl + 1 for lo mein)",
+        "Extra lean ground turkey — ~1.8kg total (900g for bolognese, 3x + 900g for mapo tofu, 3x)",
+        "Shrimp — ~500g total (250g × 2 for Alfredo, now made twice a week), 2 bags frozen (300–340g each)",
+        "Canned tuna in brine — 266g needed (likely 2 cans, drained weight varies by brand)",
+        "Liquid egg whites — 1 carton (~144g needed)",
+        "Casein protein powder — 1 large tub (~420g/week needed for the daily 2-scoop shake alone; buy accordingly)"
+      ]
+    },
+    {
+      title: "Dairy",
+      items: [
+        "Low-fat cottage cheese — 1 tub (500 g)",
+        "Nonfat Greek yogurt — 1 small tub (extra left over)"
+      ]
+    },
+    {
+      title: "Produce",
+      items: [
+        "Cauliflower rice — 2 bags (500 g each)",
+        "Zucchini — 6 medium-large (bolognese is now 3x/week)",
+        "Cucumber — ~900g regular (3 x 300g for beef bowl)",
+        "Brussels sprouts — 600g total (200g x 3, mapo tofu side)",
+        "Red onion — 1",
+        "Bok choy — 2–3 heads",
+        "Bell pepper — 1 (only needed for the lo mein now)",
+        "Onion — 1",
+        "Garlic — 1 bulb",
+        "Fresh ginger — 1 knob",
+        "Spring onions — 1-2 bunches (mapo tofu is now 3x/week)",
+        "Red chilli — 3 (mapo tofu is now 3x/week)",
+        "Firm or medium-firm tofu — 900g total (mapo tofu is now 3x/week)",
+        "Lemon — 1 (just for the tuna pancakes' zest)",
+        "Limes — 2 (beef bowl is now 3x/week)"
+      ]
+    },
+    {
+      title: "Pantry / Sauces",
+      items: [
+        "Tomato purée — 2 small cans or 1 large jar (~700g needed, bolognese is now 3x/week)",
+        "Konjac noodles — 3 packets (2 for Alfredo, now made twice a week + 1 for lo mein)",
+        "Reduced-sodium soy sauce — 1 bottle",
+        "Rice vinegar — 1 bottle",
+        "White vinegar — 1 bottle",
+        "Small jar of dill pickles — for the pickle juice",
+        "Yellow mustard — 1 bottle",
+        "Sugar-free BBQ sauce (Walden Farms) — 1 bottle",
+        "Erythritol or stevia — 1 bag/bottle",
+        "Xanthan gum — 1 small bag (lasts many weeks)",
+        "Doubanjiang (fermented broad bean chilli paste) — 1 jar",
+        "Miso paste (red or white) — 1 tub",
+        "Sake or mirin — 1 small bottle",
+        "Chicken bone broth — 1 large carton or 2 small (750mL needed, mapo tofu is now 3x/week)"
+      ]
+    },
+    {
+      title: "Check the spice rack first",
+      items: [
+        "Garlic powder",
+        "Onion powder",
+        "Italian herbs",
+        "Oregano / basil",
+        "Chilli flakes",
+        "Dried dill",
+        "Dried chives",
+        "Black pepper / salt",
+        "Smoked paprika"
+      ]
+    },
+    {
+      title: "Supplements & Electrolytes",
+      items: [
+        "Lite salt (e.g. Morton Lite Salt)",
+        "Vitamin D3",
+        "Vitamin K2",
+        "Multivitamin (Men's One A Day)",
+        "Concentrated omega-3 fish oil (triple strength, ~750–900 mg combined EPA/DHA per softgel)",
+        "Calcium supplement (citrate, 500–600 mg elemental)",
+        "Magnesium glycinate (300–400 mg elemental)"
+      ]
+    }
+  ];
+
+  const STORAGE_KEY = "psmf-app-grocery-state";
+  let checkedState = {};
+
+  function itemId(sIdx, iIdx) { return sIdx + "-" + iIdx; }
+
+  function render() {
+    const list = document.getElementById("groceryList");
+    list.innerHTML = "";
+    sections.forEach((section, sIdx) => {
+      const wrap = document.createElement("div");
+      wrap.className = "grocery-section";
+      const title = document.createElement("div");
+      title.className = "grocery-section-title";
+      title.textContent = section.title;
+      wrap.appendChild(title);
+      if (section.note) {
+        const note = document.createElement("div");
+        note.className = "grocery-section-note";
+        note.textContent = section.note;
+        wrap.appendChild(note);
+      }
+      const ul = document.createElement("ul");
+      ul.className = "grocery-list";
+      section.items.forEach((text, iIdx) => {
+        const id = itemId(sIdx, iIdx);
+        const li = document.createElement("li");
+        if (checkedState[id]) li.classList.add("checked");
+        const box = document.createElement("div");
+        box.className = "box";
+        box.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>';
+        const span = document.createElement("span");
+        span.className = "item-text";
+        span.textContent = text;
+        li.appendChild(box);
+        li.appendChild(span);
+        li.addEventListener("click", () => toggle(id));
+        ul.appendChild(li);
+      });
+      wrap.appendChild(ul);
+      list.appendChild(wrap);
+    });
+    updateProgress();
+  }
+
+  function updateProgress() {
+    const totalItems = sections.reduce((sum, s) => sum + s.items.length, 0);
+    const checkedCount = Object.values(checkedState).filter(Boolean).length;
+    const pct = totalItems ? Math.round((checkedCount / totalItems) * 100) : 0;
+    document.getElementById("progressFill").style.width = pct + "%";
+    document.getElementById("progressLabel").textContent = checkedCount + " of " + totalItems + " checked";
+  }
+
+  function setSaveStatus(ok) {
+    const el = document.getElementById("saveStatus");
+    el.className = "save-status " + (ok ? "saved" : "failed");
+    el.textContent = ok ? "✓ Saved" : "⚠ Not saved";
+  }
+
+  function saveState() {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(checkedState));
+      setSaveStatus(true);
+    } catch (e) {
+      setSaveStatus(false);
+    }
+  }
+
+  function toggle(id) {
+    checkedState[id] = !checkedState[id];
+    render();
+    saveState();
+  }
+
+  function resetAll() {
+    checkedState = {};
+    render();
+    saveState();
+  }
+
+  function init() {
+    try {
+      const local = localStorage.getItem(STORAGE_KEY);
+      if (local) checkedState = JSON.parse(local);
+      setSaveStatus(true);
+    } catch (e) {
+      checkedState = {};
+      setSaveStatus(false);
+    }
+    render();
+  }
+
+  document.getElementById("resetBtn").addEventListener("click", resetAll);
+  init();
+})();
+</script>
+
 </body>
 </html>
