@@ -263,6 +263,7 @@ const Upload = (props) => (
 );
 const { useState, useEffect, useRef } = React;
 
+
 const STORAGE_KEY = 'exercise-tracker-data-v1';
 
 function genId(prefix) {
@@ -348,6 +349,7 @@ function areaColor(area) {
 }
 
 function defaultData() {
+  const PROGRAM_1_ID = genId('prog');
   const libraryNames = [
     // Chest
     ['Cable Flye', 'Chest'],
@@ -490,6 +492,22 @@ function defaultData() {
     program: { order: days.slice(0, 4).map((d) => d.id), loggedIds: [], skippedIds: [] },
     sessionsCollapsed: false,
     activeDayId: days[0]?.id ?? null,
+    // Programs: named groupings of sessions. `days` above stays one shared pool of every session
+    // (so exercise history/PRs are shared by name across programs); each program lists which of
+    // those sessions belong to it, plus its own rotation. The active program's rotation state is
+    // mirrored into program / activeDayId / sessionsCollapsed above, so the rest of the app reads
+    // it exactly as it always has -- switching programs just swaps those in and out.
+    programs: [
+      {
+        id: PROGRAM_1_ID,
+        name: 'Program 1',
+        dayIds: days.map((d) => d.id),
+        program: { order: days.slice(0, 4).map((d) => d.id), loggedIds: [], skippedIds: [] },
+        activeDayId: days[0]?.id ?? null,
+        sessionsCollapsed: false,
+      },
+    ],
+    activeProgramId: PROGRAM_1_ID,
     ...defaultFlexData(),
   };
 }
@@ -533,18 +551,93 @@ function defaultFlexData() {
 // Fills in fields that may be missing from data saved by an earlier version of the app,
 // re-buckets any muscle group that no longer exists (e.g. the old 'Arms'/'Legs') into 'Other',
 // and drops any stale day ids from the active-program order (e.g. a deleted day).
+// The program currently selected, and its sessions in the order that program lists them.
+function getActiveProgram(data) {
+  return data.programs.find((p) => p.id === data.activeProgramId) || data.programs[0];
+}
+function getProgramDays(data) {
+  const p = getActiveProgram(data);
+  return p.dayIds.map((id) => data.days.find((d) => d.id === id)).filter(Boolean);
+}
+
 function normalize(parsed) {
   const days = (parsed.days || []).map((d) => ({ ...d, archived: d.archived || [] }));
   const dayIds = days.map((d) => d.id);
-  // Saves from before the program feature existed have no `program` field at all — for those,
-  // default the order to every current day (one-time migration). Once a program field exists,
-  // trust it as-is: a day missing from it was deliberately removed and should stay removed,
-  // not get silently re-added just because it still exists in `days`.
-  const savedOrder = parsed.program ? parsed.program.order || [] : dayIds;
-  const order = savedOrder.filter((id) => dayIds.includes(id));
-  const loggedIds = (parsed.program && parsed.program.loggedIds) || [];
-  const skippedIds = (parsed.program && parsed.program.skippedIds) || [];
-  const activeDayId = dayIds.includes(parsed.activeDayId) ? parsed.activeDayId : dayIds[0] ?? null;
+  // --- Programs (named groupings of sessions) ---
+  // Saves from before programs existed have no `programs` field: wrap every existing session into
+  // one "Program 1", carrying over the existing rotation / selected session / collapsed state, so
+  // nothing about the current setup changes. Once programs exist, they're trusted (sanitized
+  // against days that no longer exist).
+  const sanitizeRotation = (rot, allowedIds) => ({
+    order: ((rot && rot.order) || []).filter((id) => allowedIds.includes(id)),
+    loggedIds: (rot && rot.loggedIds) || [],
+    skippedIds: (rot && rot.skippedIds) || [],
+  });
+
+  let programs;
+  if (Array.isArray(parsed.programs) && parsed.programs.length > 0) {
+    const claimed = new Set();
+    programs = parsed.programs.map((p, i) => {
+      const pDayIds = (p.dayIds || []).filter((id) => {
+        if (!dayIds.includes(id) || claimed.has(id)) return false;
+        claimed.add(id);
+        return true;
+      });
+      return {
+        id: p.id || genId('prog'),
+        name: typeof p.name === 'string' && p.name.trim() ? p.name : `Program ${i + 1}`,
+        dayIds: pDayIds,
+        program: sanitizeRotation(p.program, pDayIds),
+        activeDayId: pDayIds.includes(p.activeDayId) ? p.activeDayId : pDayIds[0] ?? null,
+        sessionsCollapsed: typeof p.sessionsCollapsed === 'boolean' ? p.sessionsCollapsed : false,
+      };
+    });
+  } else {
+    // Legacy save: no `program` field at all means "every current day is in the rotation".
+    const legacyOrder = parsed.program ? parsed.program.order || [] : dayIds;
+    programs = [
+      {
+        id: genId('prog'),
+        name: 'Program 1',
+        dayIds: [...dayIds],
+        program: sanitizeRotation({ ...(parsed.program || {}), order: legacyOrder }, dayIds),
+        activeDayId: dayIds.includes(parsed.activeDayId) ? parsed.activeDayId : dayIds[0] ?? null,
+        sessionsCollapsed: typeof parsed.sessionsCollapsed === 'boolean' ? parsed.sessionsCollapsed : false,
+      },
+    ];
+  }
+
+  const activeProgramId = programs.some((p) => p.id === parsed.activeProgramId) ? parsed.activeProgramId : programs[0].id;
+
+  // Any session that somehow belongs to no program is attached to the active one rather than lost.
+  const claimedAll = new Set(programs.flatMap((p) => p.dayIds));
+  const orphanIds = dayIds.filter((id) => !claimedAll.has(id));
+  if (orphanIds.length) {
+    const ap = programs.find((p) => p.id === activeProgramId);
+    ap.dayIds = [...ap.dayIds, ...orphanIds];
+    if (!ap.activeDayId) ap.activeDayId = ap.dayIds[0] ?? null;
+  }
+
+  // Every program needs at least one session so the UI always has something to show.
+  programs.forEach((p) => {
+    if (p.dayIds.length === 0) {
+      const blank = { id: genId('day'), name: 'Session 1', exercises: [], archived: [] };
+      days.push(blank);
+      p.dayIds = [blank.id];
+      p.activeDayId = blank.id;
+      p.program = { ...p.program, order: [blank.id] };
+    }
+  });
+
+  // The active program's live rotation state is mirrored into program / activeDayId /
+  // sessionsCollapsed, and those mirrors are what the saved data keeps up to date -- so on load
+  // they win over the (possibly stale) copy stored inside the program itself.
+  const activeProgram = programs.find((p) => p.id === activeProgramId);
+  if (Array.isArray(parsed.programs) && parsed.programs.length > 0) {
+    if (parsed.program) activeProgram.program = sanitizeRotation(parsed.program, activeProgram.dayIds);
+    if (activeProgram.dayIds.includes(parsed.activeDayId)) activeProgram.activeDayId = parsed.activeDayId;
+    if (typeof parsed.sessionsCollapsed === 'boolean') activeProgram.sessionsCollapsed = parsed.sessionsCollapsed;
+  }
 
   // Flexibility side: if this save predates the feature entirely, seed it fresh rather than
   // leaving it empty, same as a first-ever install would get.
@@ -571,9 +664,12 @@ function normalize(parsed) {
       muscleGroup: MUSCLE_GROUPS.includes(l.muscleGroup) ? l.muscleGroup : 'Other',
     })),
     days,
-    program: { order, loggedIds, skippedIds },
-    sessionsCollapsed: typeof parsed.sessionsCollapsed === 'boolean' ? parsed.sessionsCollapsed : false,
-    activeDayId,
+    programs,
+    activeProgramId,
+    program: activeProgram.program,
+    sessionsCollapsed: activeProgram.sessionsCollapsed,
+    programsCollapsed: typeof parsed.programsCollapsed === 'boolean' ? parsed.programsCollapsed : false,
+    activeDayId: activeProgram.activeDayId,
     flexLibrary,
     flexDays,
     flexProgram: { order: flexOrder, loggedIds: flexLoggedIds, skippedIds: flexSkippedIds },
@@ -727,11 +823,17 @@ function ExerciseTracker() {
   const [openNotes, setOpenNotes] = useState({}); // shared across both sections -- exercise/stretch ids never collide
   const [openHistory, setOpenHistory] = useState({});
   const [editingDayId, setEditingDayId] = useState(null);
+  const [addingProgram, setAddingProgram] = useState(false);
+  const [newProgramName, setNewProgramName] = useState('');
+  const [editingProgramId, setEditingProgramId] = useState(null);
+  const [editingProgramName, setEditingProgramName] = useState('');
   const [editingDayName, setEditingDayName] = useState('');
   const [addingExerciseFor, setAddingExerciseFor] = useState(null);
   const [swapId, setSwapId] = useState(null);
   const [addingDay, setAddingDay] = useState(false);
   const [newDayName, setNewDayName] = useState('');
+  const [backupText, setBackupText] = useState(null); // JSON string while the backup panel is open
+  const [pasteText, setPasteText] = useState('');
   const [confirm, setConfirm] = useState(null); // { message, onConfirm } — replaces window.confirm, which sandboxed artifacts can silently block
   // Tracks every exercise instance (`${dayId}:${exId}`) that was just logged and hasn't been
   // touched since, so each one's footer button can independently show "Edit" -- purely based
@@ -943,7 +1045,9 @@ function ExerciseTracker() {
     );
   }
 
-  const activeDay = data.days.find((d) => d.id === data.activeDayId) || data.days[0];
+  // Sessions belonging to the currently selected program (data.days holds every program's sessions).
+  const programDays = getProgramDays(data);
+  const activeDay = programDays.find((d) => d.id === data.activeDayId) || programDays[0];
 
   const setActiveDayId = (id) => setData((prev) => ({ ...prev, activeDayId: id }));
 
@@ -1026,8 +1130,15 @@ function ExerciseTracker() {
     updateDay(dayId, (d) => ({ ...d, exercises: moveItem(d.exercises, fromIndex, toIndex) }));
   };
 
+  // Reorders sessions within the current program only (other programs' sessions are untouched).
   const reorderDays = (fromIndex, toIndex) => {
-    setData((prev) => ({ ...prev, days: moveItem(prev.days, fromIndex, toIndex) }));
+    setData((prev) => {
+      const ap = getActiveProgram(prev);
+      return {
+        ...prev,
+        programs: prev.programs.map((p) => (p.id === ap.id ? { ...p, dayIds: moveItem(p.dayIds, fromIndex, toIndex) } : p)),
+      };
+    });
   };
 
   // Drag-to-reorder for exercises within the active day. The handle captures the pointer on
@@ -1099,7 +1210,7 @@ function ExerciseTracker() {
 
     if (!dayTabsRef.current) return;
     const els = Array.from(dayTabsRef.current.querySelectorAll('[data-sort-id]'));
-    const currentIndex = data.days.findIndex((d) => d.id === st.id);
+    const currentIndex = getActiveProgram(data).dayIds.findIndex((id) => id === st.id);
     if (currentIndex === -1) return;
     let targetIndex = els.length - 1;
     for (let i = 0; i < els.length; i++) {
@@ -1222,21 +1333,79 @@ function ExerciseTracker() {
     setData((prev) => ({ ...prev, library: prev.library.map((l) => (l.id === id ? { ...l, muscleGroup } : l)) }));
   };
 
+  // Phone-app wrappers (WebViews) often can't download blob files, so "Save my data" opens a panel
+  // with several routes: download, share sheet, copy to clipboard, or long-press the text itself.
   const exportData = () => {
+    setBackupText(JSON.stringify(data, null, 2));
+    setPasteText('');
+  };
+
+  const backupFileName = () => `gainz-gizmo-backup-${new Date().toISOString().slice(0, 10)}.json`;
+
+  const downloadBackup = () => {
     try {
-      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const blob = new Blob([backupText], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `gainz-gizmo-backup-${new Date().toISOString().slice(0, 10)}.json`;
+      a.download = backupFileName();
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-      showToast('Backup downloaded');
+      setTimeout(() => URL.revokeObjectURL(url), 2000);
+      showToast('Download started (or use Copy)');
     } catch (e) {
-      showToast("Couldn't create the backup file", 'error');
+      showToast("Download unavailable -- use Copy", 'error');
     }
+  };
+
+  const shareBackup = async () => {
+    try {
+      const file = new File([backupText], backupFileName(), { type: 'application/json' });
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({ files: [file], title: 'Gainz Gizmo backup' });
+      } else if (navigator.share) {
+        await navigator.share({ title: 'Gainz Gizmo backup', text: backupText });
+      } else {
+        showToast("Share unavailable -- use Copy", 'error');
+      }
+    } catch (e) {
+      if (e && e.name !== 'AbortError') showToast("Share failed -- use Copy", 'error');
+    }
+  };
+
+  const copyBackup = async () => {
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(backupText);
+      } else {
+        throw new Error('no clipboard');
+      }
+      showToast('Backup copied -- paste it somewhere safe');
+    } catch (e) {
+      try {
+        const ta = document.getElementById('backup-text-area');
+        ta.focus();
+        ta.select();
+        ta.setSelectionRange(0, ta.value.length);
+        if (document.execCommand('copy')) showToast('Backup copied -- paste it somewhere safe');
+        else showToast('Hold the text, then Select all > Copy', 'error');
+      } catch (e2) {
+        showToast('Hold the text, then Select all > Copy', 'error');
+      }
+    }
+  };
+
+  const restoreFromPaste = () => {
+    let parsed;
+    try {
+      parsed = JSON.parse(pasteText);
+    } catch (e) {
+      showToast("That text doesn't look like a valid backup", 'error');
+      return;
+    }
+    setBackupText(null);
+    importData(parsed);
   };
 
   // Called by LibraryView once it's read and JSON.parsed the chosen file itself.
@@ -1481,11 +1650,15 @@ function ExerciseTracker() {
     const name = newDayName.trim();
     if (!name) return;
     const id = genId('day');
-    setData((prev) => ({
-      ...prev,
-      days: [...prev.days, { id, name, exercises: [], archived: [] }],
-      program: { ...prev.program, order: [...prev.program.order, id] },
-    }));
+    setData((prev) => {
+      const ap = getActiveProgram(prev);
+      return {
+        ...prev,
+        days: [...prev.days, { id, name, exercises: [], archived: [] }],
+        programs: prev.programs.map((p) => (p.id === ap.id ? { ...p, dayIds: [...p.dayIds, id] } : p)),
+        program: { ...prev.program, order: [...prev.program.order, id] },
+      };
+    });
     setActiveDayId(id);
     setNewDayName('');
     setAddingDay(false);
@@ -1505,16 +1678,132 @@ function ExerciseTracker() {
   };
 
   const deleteDay = (dayId, name) => {
-    if (data.days.length <= 1) return; // button is disabled in this case, see render
+    if (programDays.length <= 1) return; // button is disabled in this case, see render
     askConfirm(`Delete "${name}" and everything logged for it?`, () => {
-      const remaining = data.days.filter((d) => d.id !== dayId);
-      setData((prev) => ({
-        ...prev,
-        days: remaining,
-        program: { ...prev.program, order: prev.program.order.filter((id) => id !== dayId) },
-      }));
-      if (data.activeDayId === dayId) setActiveDayId(remaining[0]?.id ?? null);
+      const remainingInProgram = programDays.filter((d) => d.id !== dayId);
+      setData((prev) => {
+        const ap = getActiveProgram(prev);
+        return {
+          ...prev,
+          days: prev.days.filter((d) => d.id !== dayId),
+          programs: prev.programs.map((p) => (p.id === ap.id ? { ...p, dayIds: p.dayIds.filter((id) => id !== dayId) } : p)),
+          program: { ...prev.program, order: prev.program.order.filter((id) => id !== dayId) },
+        };
+      });
+      if (data.activeDayId === dayId) setActiveDayId(remainingInProgram[0]?.id ?? null);
     });
+  };
+
+  // ============================================================
+  // Programs: named groupings of sessions, each with its own session order and rotation.
+  // The active program's rotation state lives in program / activeDayId / sessionsCollapsed
+  // (the "live" copy the rest of the app reads); the other programs keep their own copy inside
+  // data.programs. Anything that changes which program is active first writes the live copy
+  // back into the program being left, then loads the new one's.
+  // ============================================================
+  const commitLiveIntoActiveProgram = (prev) =>
+    prev.programs.map((p) =>
+      p.id === prev.activeProgramId
+        ? { ...p, program: prev.program, activeDayId: prev.activeDayId, sessionsCollapsed: prev.sessionsCollapsed }
+        : p
+    );
+
+  const switchProgram = (id) => {
+    if (id === data.activeProgramId) return;
+    setEditingDayId(null);
+    setEditingProgramId(null);
+    setAddingDay(false);
+    setData((prev) => {
+      const committed = commitLiveIntoActiveProgram(prev);
+      const target = committed.find((p) => p.id === id);
+      if (!target) return prev;
+      return {
+        ...prev,
+        programs: committed,
+        activeProgramId: id,
+        program: target.program,
+        activeDayId: target.activeDayId,
+        sessionsCollapsed: target.sessionsCollapsed,
+      };
+    });
+  };
+
+  // A new program starts with one empty session (already in its rotation) so there's always
+  // something to build from. Sessions and exercises are then added the usual way.
+  const addProgram = () => {
+    const name = newProgramName.trim() || `Program ${data.programs.length + 1}`;
+    const progId = genId('prog');
+    const dayId = genId('day');
+    setEditingDayId(null);
+    setEditingProgramId(null);
+    setAddingDay(false);
+    setData((prev) => {
+      const committed = commitLiveIntoActiveProgram(prev);
+      const fresh = {
+        id: progId,
+        name,
+        dayIds: [dayId],
+        program: { order: [dayId], loggedIds: [], skippedIds: [] },
+        activeDayId: dayId,
+        sessionsCollapsed: false,
+      };
+      return {
+        ...prev,
+        days: [...prev.days, { id: dayId, name: 'Session 1', exercises: [], archived: [] }],
+        programs: [...committed, fresh],
+        activeProgramId: progId,
+        program: fresh.program,
+        activeDayId: dayId,
+        sessionsCollapsed: false,
+      };
+    });
+    setNewProgramName('');
+    setAddingProgram(false);
+    showToast(`Created "${name}"`);
+  };
+
+  const startRenameProgram = (id, currentName) => {
+    setEditingProgramId(id);
+    setEditingProgramName(currentName);
+  };
+
+  const confirmRenameProgram = (id) => {
+    const name = editingProgramName.trim();
+    if (name) {
+      setData((prev) => ({ ...prev, programs: prev.programs.map((p) => (p.id === id ? { ...p, name } : p)) }));
+    }
+    setEditingProgramId(null);
+  };
+
+  // Deleting a program deletes its sessions too (and the history logged in them), same as
+  // deleting a single session does -- so it asks first, and the last program can't be deleted.
+  const deleteProgram = (id) => {
+    if (data.programs.length <= 1) return; // button is disabled in this case, see render
+    const target = data.programs.find((p) => p.id === id);
+    if (!target) return;
+    askConfirm(
+      `Delete "${target.name}", its ${target.dayIds.length} session${target.dayIds.length === 1 ? '' : 's'}, and everything logged in them? This can't be undone.`,
+      () => {
+        setEditingProgramId(null);
+        setData((prev) => {
+          const t = prev.programs.find((p) => p.id === id);
+          if (!t) return prev;
+          const remaining = prev.programs.filter((p) => p.id !== id);
+          const days = prev.days.filter((d) => !t.dayIds.includes(d.id));
+          if (id !== prev.activeProgramId) return { ...prev, days, programs: remaining };
+          const next = remaining[0];
+          return {
+            ...prev,
+            days,
+            programs: remaining,
+            activeProgramId: next.id,
+            program: next.program,
+            activeDayId: next.activeDayId,
+            sessionsCollapsed: next.sessionsCollapsed,
+          };
+        });
+      }
+    );
   };
 
   // ============================================================
@@ -2589,6 +2878,115 @@ function ExerciseTracker() {
           </>
         ) : (
           <>
+            {/* Programs: named groupings of sessions, each with its own sessions, exercises and rotation */}
+            <div className="mb-4">
+              <button
+                onClick={() => setData((prev) => ({ ...prev, programsCollapsed: !prev.programsCollapsed }))}
+                className="flex items-center gap-1 text-[11px] font-bold uppercase tracking-wide text-stone-500 hover:text-stone-300 mb-1.5"
+              >
+                {data.programsCollapsed ? <ChevronDown className="w-3 h-3" /> : <ChevronUp className="w-3 h-3" />}
+                Program
+                {data.programsCollapsed && (
+                  <span className="text-stone-600 normal-case tracking-normal font-semibold">
+                    · {getActiveProgram(data).name}
+                  </span>
+                )}
+              </button>
+              {!data.programsCollapsed && (<>
+              <div className="flex items-center gap-1.5 overflow-x-auto pb-1 -mx-1 px-1">
+                {data.programs.map((p) => (
+                  <button
+                    key={p.id}
+                    onClick={() => switchProgram(p.id)}
+                    className={`shrink-0 px-3 py-1.5 rounded-md text-sm font-bold transition-all select-none ${
+                      p.id === data.activeProgramId
+                        ? 'bg-stone-200 text-stone-950'
+                        : 'bg-stone-900 text-stone-400 hover:bg-stone-800 hover:text-stone-200'
+                    }`}
+                  >
+                    {p.name}
+                  </button>
+                ))}
+                {addingProgram ? (
+                  <div className="shrink-0 flex items-center gap-1 bg-stone-900 rounded-md px-2 py-1">
+                    <input
+                      autoFocus
+                      value={newProgramName}
+                      onChange={(e) => setNewProgramName(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') addProgram();
+                        if (e.key === 'Escape') {
+                          setAddingProgram(false);
+                          setNewProgramName('');
+                        }
+                      }}
+                      placeholder="Program name"
+                      className="bg-transparent text-sm text-stone-100 outline-none w-32 placeholder:text-stone-600"
+                    />
+                    <button onClick={addProgram} className="text-cyan-500 hover:text-cyan-400" aria-label="Create program">
+                      <Check className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={() => {
+                        setAddingProgram(false);
+                        setNewProgramName('');
+                      }}
+                      className="text-stone-600 hover:text-stone-400"
+                      aria-label="Cancel"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => setAddingProgram(true)}
+                    className="shrink-0 p-2 rounded-md bg-stone-900 text-stone-500 hover:text-stone-200 hover:bg-stone-800"
+                    aria-label="New program"
+                    title="New program"
+                  >
+                    <Plus className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
+              <div className="flex items-center justify-between mt-1.5">
+                {editingProgramId === data.activeProgramId ? (
+                  <div className="flex items-center gap-1.5">
+                    <input
+                      autoFocus
+                      value={editingProgramName}
+                      onChange={(e) => setEditingProgramName(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') confirmRenameProgram(data.activeProgramId);
+                        if (e.key === 'Escape') setEditingProgramId(null);
+                      }}
+                      className="bg-stone-900 border border-stone-700 rounded px-2 py-1 text-sm text-stone-100 outline-none focus:border-stone-400"
+                    />
+                    <button onClick={() => confirmRenameProgram(data.activeProgramId)} className="text-cyan-500 hover:text-cyan-400">
+                      <Check className="w-4 h-4" />
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => startRenameProgram(data.activeProgramId, getActiveProgram(data).name)}
+                    className="flex items-center gap-1.5 text-stone-500 hover:text-stone-300 text-xs"
+                  >
+                    <Pencil className="w-3 h-3" /> Rename program
+                  </button>
+                )}
+                <button
+                  onClick={() => deleteProgram(data.activeProgramId)}
+                  disabled={data.programs.length <= 1}
+                  title={data.programs.length <= 1 ? 'Create another program before deleting this one' : undefined}
+                  className={`flex items-center gap-1.5 text-xs ${
+                    data.programs.length <= 1 ? 'text-stone-800 cursor-not-allowed' : 'text-stone-600 hover:text-red-500'
+                  }`}
+                >
+                  <Trash2 className="w-3 h-3" /> Delete program
+                </button>
+              </div>
+              </>)}
+            </div>
+
             {/* Day tabs */}
             <div className="flex items-center justify-between mb-1.5">
               <button
@@ -2612,7 +3010,7 @@ function ExerciseTracker() {
               ref={dayTabsRef}
               className={`flex items-center gap-1.5 pb-1 mb-5 -mx-1 px-1 ${draggingDayId ? 'overflow-x-hidden' : 'overflow-x-auto'}`}
             >
-              {data.days.map((d) => (
+              {programDays.map((d) => (
                 <div
                   key={d.id}
                   data-sort-id={d.id}
@@ -2676,7 +3074,7 @@ function ExerciseTracker() {
             )}
 
             {/* Active Program */}
-            {data.days.length > 0 && (
+            {programDays.length > 0 && (
               <div className="mb-5">
                 <div className="flex items-center justify-between mb-1.5">
                   <p className="text-[11px] font-bold uppercase tracking-wide text-stone-500">
@@ -2789,10 +3187,10 @@ function ExerciseTracker() {
                 )}
                 <button
                   onClick={() => deleteDay(activeDay.id, activeDay.name)}
-                  disabled={data.days.length <= 1}
-                  title={data.days.length <= 1 ? 'Add another day before deleting this one' : undefined}
+                  disabled={programDays.length <= 1}
+                  title={programDays.length <= 1 ? 'Add another day before deleting this one' : undefined}
                   className={`flex items-center gap-1.5 text-xs ${
-                    data.days.length <= 1 ? 'text-stone-800 cursor-not-allowed' : 'text-stone-600 hover:text-red-500'
+                    programDays.length <= 1 ? 'text-stone-800 cursor-not-allowed' : 'text-stone-600 hover:text-red-500'
                   }`}
                 >
                   <Trash2 className="w-3 h-3" /> Delete day
@@ -3111,6 +3509,61 @@ function ExerciseTracker() {
           </>
         )}
       </div>
+
+      {backupText !== null && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 px-4" onClick={() => setBackupText(null)}>
+          <div
+            className="bg-stone-900 border border-stone-700 rounded-lg p-4 max-w-md w-full max-h-[90vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-sm font-bold text-stone-200">Save my data</p>
+              <button onClick={() => setBackupText(null)} className="text-stone-500 hover:text-stone-300" aria-label="Close">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <p className="text-[11px] text-stone-500 mb-2">
+              Pick whatever works on your device. Copy is the most reliable in the phone app.
+            </p>
+            <div className="flex gap-2 mb-2">
+              <button onClick={copyBackup} className="flex-1 px-3 py-2 rounded-md bg-cyan-600 text-stone-950 text-sm font-bold hover:bg-cyan-500">
+                Copy
+              </button>
+              <button onClick={shareBackup} className="flex-1 px-3 py-2 rounded-md border border-stone-700 text-sm text-stone-300 hover:text-stone-100">
+                Share
+              </button>
+              <button onClick={downloadBackup} className="flex-1 px-3 py-2 rounded-md border border-stone-700 text-sm text-stone-300 hover:text-stone-100">
+                Download
+              </button>
+            </div>
+            <textarea
+              id="backup-text-area"
+              readOnly
+              value={backupText}
+              onFocus={(e) => e.target.select()}
+              rows={4}
+              className="w-full bg-stone-950 border border-stone-800 rounded p-2 text-[11px] text-stone-400 font-mono outline-none"
+            />
+            <div className="mt-4 pt-3 border-t border-stone-800">
+              <p className="text-[11px] font-bold uppercase tracking-wide text-stone-500 mb-1.5">Restore from pasted text</p>
+              <textarea
+                value={pasteText}
+                onChange={(e) => setPasteText(e.target.value)}
+                placeholder="Paste a backup here"
+                rows={3}
+                className="w-full bg-stone-950 border border-stone-800 rounded p-2 text-[11px] text-stone-300 font-mono outline-none placeholder:text-stone-600"
+              />
+              <button
+                onClick={restoreFromPaste}
+                disabled={!pasteText.trim()}
+                className="mt-2 w-full px-3 py-2 rounded-md border border-stone-700 text-sm text-stone-300 hover:text-stone-100 disabled:opacity-40"
+              >
+                Restore from pasted text
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {confirm && (
         <div
