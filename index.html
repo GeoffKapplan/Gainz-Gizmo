@@ -1336,7 +1336,7 @@ function ExerciseTracker() {
   // Phone-app wrappers (WebViews) often can't download blob files, so "Save my data" opens a panel
   // with several routes: download, share sheet, copy to clipboard, or long-press the text itself.
   const exportData = () => {
-    setBackupText(JSON.stringify(data, null, 2));
+    setBackupText(JSON.stringify(data)); // compact: roughly half the size of pretty-printed JSON
     setPasteText('');
   };
 
@@ -1374,24 +1374,34 @@ function ExerciseTracker() {
     }
   };
 
-  const copyBackup = async () => {
+  const BACKUP_CHUNK = 8000;
+  const backupParts = backupText ? backupText.match(new RegExp(`[\\s\\S]{1,${BACKUP_CHUNK}}`, 'g')) || [] : [];
+
+  const copyBackup = async (text = backupText, label = 'Backup') => {
+    const done = () => showToast(`${label} copied`);
     try {
       if (navigator.clipboard && navigator.clipboard.writeText) {
-        await navigator.clipboard.writeText(backupText);
-      } else {
-        throw new Error('no clipboard');
+        await navigator.clipboard.writeText(text);
+        done();
+        return;
       }
-      showToast('Backup copied -- paste it somewhere safe');
+      throw new Error('no clipboard');
     } catch (e) {
       try {
-        const ta = document.getElementById('backup-text-area');
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
         ta.focus();
         ta.select();
-        ta.setSelectionRange(0, ta.value.length);
-        if (document.execCommand('copy')) showToast('Backup copied -- paste it somewhere safe');
-        else showToast('Hold the text, then Select all > Copy', 'error');
+        ta.setSelectionRange(0, text.length);
+        const ok = document.execCommand('copy');
+        document.body.removeChild(ta);
+        if (ok) done();
+        else showToast('Copy failed -- try the smaller parts', 'error');
       } catch (e2) {
-        showToast('Hold the text, then Select all > Copy', 'error');
+        showToast('Copy failed -- try the smaller parts', 'error');
       }
     }
   };
@@ -1399,7 +1409,8 @@ function ExerciseTracker() {
   const restoreFromPaste = () => {
     let parsed;
     try {
-      parsed = JSON.parse(pasteText);
+      // Compact JSON has no raw line breaks, so any in the pasted text came from joining parts.
+      parsed = JSON.parse(pasteText.replace(/[\r\n]+/g, '').trim());
     } catch (e) {
       showToast("That text doesn't look like a valid backup", 'error');
       return;
@@ -3526,7 +3537,7 @@ function ExerciseTracker() {
               Pick whatever works on your device. Copy is the most reliable in the phone app.
             </p>
             <div className="flex gap-2 mb-2">
-              <button onClick={copyBackup} className="flex-1 px-3 py-2 rounded-md bg-cyan-600 text-stone-950 text-sm font-bold hover:bg-cyan-500">
+              <button onClick={() => copyBackup()} className="flex-1 px-3 py-2 rounded-md bg-cyan-600 text-stone-950 text-sm font-bold hover:bg-cyan-500">
                 Copy
               </button>
               <button onClick={shareBackup} className="flex-1 px-3 py-2 rounded-md border border-stone-700 text-sm text-stone-300 hover:text-stone-100">
@@ -3536,6 +3547,24 @@ function ExerciseTracker() {
                 Download
               </button>
             </div>
+            {backupParts.length > 1 && (
+              <div className="mb-2">
+                <p className="text-[11px] text-stone-500 mb-1.5">
+                  Long backup? Copy it in {backupParts.length} smaller parts instead. Paste each one into your note in order, then paste them all into the restore box the same way.
+                </p>
+                <div className="flex flex-wrap gap-1.5">
+                  {backupParts.map((part, idx) => (
+                    <button
+                      key={idx}
+                      onClick={() => copyBackup(part, `Part ${idx + 1} of ${backupParts.length}`)}
+                      className="px-2.5 py-1.5 rounded-md border border-stone-700 text-xs text-stone-300 hover:text-stone-100"
+                    >
+                      Part {idx + 1}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
             <textarea
               id="backup-text-area"
               readOnly
