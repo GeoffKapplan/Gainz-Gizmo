@@ -497,6 +497,9 @@ function defaultData() {
     // those sessions belong to it, plus its own rotation. The active program's rotation state is
     // mirrored into program / activeDayId / sessionsCollapsed above, so the rest of the app reads
     // it exactly as it always has -- switching programs just swaps those in and out.
+    exerciseNotes: {},
+    flexNotes: {},
+    archivedPrograms: [],
     programs: [
       {
         id: PROGRAM_1_ID,
@@ -560,6 +563,42 @@ function getProgramDays(data) {
   return p.dayIds.map((id) => data.days.find((d) => d.id === id)).filter(Boolean);
 }
 
+// Exercise notes belong to the exercise NAME, not to one card: the same lift in two sessions or
+// two programs shows (and edits) the same note, and the note survives removing the exercise from
+// every session. Keyed by lowercase trimmed name.
+function noteKey(name) {
+  return String(name || '').trim().toLowerCase();
+}
+function getNote(map, name) {
+  return (map && map[noteKey(name)]) || '';
+}
+// Folds any per-card `notes` from older saves into the by-name map (distinct notes for the same
+// name are kept, joined by a line break), then blanks the per-card field so it can't resurface.
+function migrateNotes(days, existing) {
+  const map = { ...(existing && typeof existing === 'object' ? existing : {}) };
+  const found = {};
+  const cards = (d) => [...(d.exercises || []), ...(d.archived || [])];
+  days.forEach((d) =>
+    cards(d).forEach((ex) => {
+      const t = typeof ex.notes === 'string' ? ex.notes.trim() : '';
+      const k = noteKey(ex.name);
+      if (t && !(k in map)) {
+        found[k] = found[k] || [];
+        if (!found[k].includes(t)) found[k].push(t);
+      }
+    })
+  );
+  Object.keys(found).forEach((k) => {
+    map[k] = found[k].join('\n');
+  });
+  const cleaned = days.map((d) => ({
+    ...d,
+    exercises: (d.exercises || []).map((ex) => ({ ...ex, notes: '' })),
+    archived: (d.archived || []).map((ex) => ({ ...ex, notes: '' })),
+  }));
+  return { map, days: cleaned };
+}
+
 function normalize(parsed) {
   const days = (parsed.days || []).map((d) => ({ ...d, archived: d.archived || [] }));
   const dayIds = days.map((d) => d.id);
@@ -609,8 +648,31 @@ function normalize(parsed) {
 
   const activeProgramId = programs.some((p) => p.id === parsed.activeProgramId) ? parsed.activeProgramId : programs[0].id;
 
+  // Archived programs: removed from the program list but their sessions (and every log in them) stay
+  // in the shared pool, so history and PRs by exercise name keep working. Can be restored or
+  // permanently deleted. Their sessions are never re-attached as orphans.
+  const liveClaimed = new Set(programs.flatMap((p) => p.dayIds));
+  const archivedPrograms = [];
+  (Array.isArray(parsed.archivedPrograms) ? parsed.archivedPrograms : []).forEach((a, i) => {
+    const aDayIds = (a.dayIds || []).filter((id) => {
+      if (!dayIds.includes(id) || liveClaimed.has(id)) return false;
+      liveClaimed.add(id);
+      return true;
+    });
+    if (!aDayIds.length) return;
+    archivedPrograms.push({
+      id: a.id || genId('prog'),
+      name: typeof a.name === 'string' && a.name.trim() ? a.name : `Archived ${i + 1}`,
+      dayIds: aDayIds,
+      program: sanitizeRotation(a.program, aDayIds),
+      activeDayId: aDayIds.includes(a.activeDayId) ? a.activeDayId : aDayIds[0],
+      sessionsCollapsed: typeof a.sessionsCollapsed === 'boolean' ? a.sessionsCollapsed : false,
+      archivedAt: a.archivedAt || null,
+    });
+  });
+
   // Any session that somehow belongs to no program is attached to the active one rather than lost.
-  const claimedAll = new Set(programs.flatMap((p) => p.dayIds));
+  const claimedAll = liveClaimed;
   const orphanIds = dayIds.filter((id) => !claimedAll.has(id));
   if (orphanIds.length) {
     const ap = programs.find((p) => p.id === activeProgramId);
@@ -658,20 +720,26 @@ function normalize(parsed) {
     ? (parsed.flexLibrary || []).map((l) => ({ ...l, area: BODY_AREAS.includes(l.area) ? l.area : 'Other' }))
     : flexSeed.flexLibrary;
 
+  const migratedStrength = migrateNotes(days, parsed.exerciseNotes);
+  const migratedFlex = migrateNotes(flexDays, parsed.flexNotes);
+
   return {
     library: (parsed.library || []).map((l) => ({
       ...l,
       muscleGroup: MUSCLE_GROUPS.includes(l.muscleGroup) ? l.muscleGroup : 'Other',
     })),
-    days,
+    days: migratedStrength.days,
+    exerciseNotes: migratedStrength.map,
+    flexNotes: migratedFlex.map,
     programs,
+    archivedPrograms,
     activeProgramId,
     program: activeProgram.program,
     sessionsCollapsed: activeProgram.sessionsCollapsed,
     programsCollapsed: typeof parsed.programsCollapsed === 'boolean' ? parsed.programsCollapsed : false,
     activeDayId: activeProgram.activeDayId,
     flexLibrary,
-    flexDays,
+    flexDays: migratedFlex.days,
     flexProgram: { order: flexOrder, loggedIds: flexLoggedIds, skippedIds: flexSkippedIds },
     flexSessionsCollapsed: typeof parsed.flexSessionsCollapsed === 'boolean' ? parsed.flexSessionsCollapsed : false,
     flexActiveDayId,
@@ -1598,8 +1666,8 @@ function ExerciseTracker() {
     updateExercise(dayId, exId, (ex) => ({ ...ex, sets: [{ weight: '', reps: '' }] }));
   };
 
-  const updateNotes = (dayId, exId, text) => {
-    updateExercise(dayId, exId, (ex) => ({ ...ex, notes: text }));
+  const updateNotes = (name, text) => {
+    setData((prev) => ({ ...prev, exerciseNotes: { ...(prev.exerciseNotes || {}), [noteKey(name)]: text } }));
   };
 
   const toggleNotes = (exId) => setOpenNotes((p) => ({ ...p, [exId]: !p[exId] }));
@@ -1788,33 +1856,126 @@ function ExerciseTracker() {
 
   // Deleting a program deletes its sessions too (and the history logged in them), same as
   // deleting a single session does -- so it asks first, and the last program can't be deleted.
+  // "Deleting" a program archives it: its sessions and every log stay in the shared pool, so
+  // history and PRs by exercise name are untouched. It can be restored, or deleted for good.
   const deleteProgram = (id) => {
     if (data.programs.length <= 1) return; // button is disabled in this case, see render
     const target = data.programs.find((p) => p.id === id);
     if (!target) return;
     askConfirm(
-      `Delete "${target.name}", its ${target.dayIds.length} session${target.dayIds.length === 1 ? '' : 's'}, and everything logged in them? This can't be undone.`,
+      `Archive "${target.name}"? Its ${target.dayIds.length} session${target.dayIds.length === 1 ? '' : 's'} and everything logged stay in your history and PRs, and you can restore it any time.`,
       () => {
         setEditingProgramId(null);
         setData((prev) => {
           const t = prev.programs.find((p) => p.id === id);
           if (!t) return prev;
+          const isActive = id === prev.activeProgramId;
+          const archivedEntry = {
+            ...t,
+            ...(isActive ? { program: prev.program, activeDayId: prev.activeDayId, sessionsCollapsed: prev.sessionsCollapsed } : {}),
+            archivedAt: new Date().toISOString(),
+          };
           const remaining = prev.programs.filter((p) => p.id !== id);
-          const days = prev.days.filter((d) => !t.dayIds.includes(d.id));
-          if (id !== prev.activeProgramId) return { ...prev, days, programs: remaining };
+          const archivedPrograms = [...(prev.archivedPrograms || []), archivedEntry];
+          if (!isActive) return { ...prev, programs: remaining, archivedPrograms };
           const next = remaining[0];
           return {
             ...prev,
-            days,
             programs: remaining,
+            archivedPrograms,
             activeProgramId: next.id,
             program: next.program,
             activeDayId: next.activeDayId,
             sessionsCollapsed: next.sessionsCollapsed,
           };
         });
+        showToast(`Archived "${target.name}"`);
+      },
+      'Archive'
+    );
+  };
+
+  const restoreProgram = (id) => {
+    setData((prev) => {
+      const a = (prev.archivedPrograms || []).find((x) => x.id === id);
+      if (!a) return prev;
+      const { archivedAt, ...restored } = a;
+      return {
+        ...prev,
+        programs: [...prev.programs, restored],
+        archivedPrograms: prev.archivedPrograms.filter((x) => x.id !== id),
+      };
+    });
+    showToast('Program restored');
+  };
+
+  const deleteArchivedProgram = (id) => {
+    const a = (data.archivedPrograms || []).find((x) => x.id === id);
+    if (!a) return;
+    askConfirm(
+      `Permanently delete "${a.name}", its ${a.dayIds.length} session${a.dayIds.length === 1 ? '' : 's'}, and everything logged in them? This can't be undone.`,
+      () => {
+        setData((prev) => ({
+          ...prev,
+          days: prev.days.filter((d) => !a.dayIds.includes(d.id)),
+          archivedPrograms: (prev.archivedPrograms || []).filter((x) => x.id !== id),
+        }));
       }
     );
+  };
+
+  // Renames an exercise (or stretch) everywhere it appears -- every session in every program,
+  // archived cards, the library entry and its note -- so history stays together under the new
+  // name. If the new name already exists, the two are combined.
+  const renameExerciseEverywhere = (kind, oldName, rawNew) => {
+    const newName = rawNew.trim();
+    if (!newName || newName === oldName) return;
+    const daysKey = kind === 'flex' ? 'flexDays' : 'days';
+    const libKey = kind === 'flex' ? 'flexLibrary' : 'library';
+    const notesKey = kind === 'flex' ? 'flexNotes' : 'exerciseNotes';
+    const oldK = noteKey(oldName);
+    const newK = noteKey(newName);
+    const exists =
+      oldK !== newK &&
+      (data[libKey].some((l) => noteKey(l.name) === newK) ||
+        data[daysKey].some((d) => [...d.exercises, ...(d.archived || [])].some((e) => noteKey(e.name) === newK)));
+    const doRename = () => {
+      setData((prev) => {
+        const renameCards = (list) => (list || []).map((e) => (noteKey(e.name) === oldK ? { ...e, name: newName } : e));
+        const nextDays = prev[daysKey].map((d) => ({ ...d, exercises: renameCards(d.exercises), archived: renameCards(d.archived) }));
+        let renamedOne = false;
+        const nextLib = [];
+        prev[libKey].forEach((l) => {
+          if (noteKey(l.name) === oldK) {
+            if (renamedOne || prev[libKey].some((o) => o !== l && noteKey(o.name) === newK)) return; // merged into existing entry
+            renamedOne = true;
+            nextLib.push({ ...l, name: newName });
+          } else nextLib.push(l);
+        });
+        const notes = { ...(prev[notesKey] || {}) };
+        if (oldK !== newK) {
+          const parts = [notes[newK], notes[oldK]].map((t) => (t || '').trim()).filter(Boolean);
+          const merged = parts.filter((t, i) => parts.indexOf(t) === i).join('\n');
+          delete notes[oldK];
+          notes[newK] = merged;
+        }
+        return { ...prev, [daysKey]: nextDays, [libKey]: nextLib, [notesKey]: notes };
+      });
+      if (kind === 'flex') setFlexPrName(newName);
+      else setPrName(newName);
+      showToast(`Renamed to "${newName}"`);
+    };
+    if (exists) {
+      if (kind === 'flex') setFlexPrName(null);
+      else setPrName(null); // close the preview so the confirm dialog isn't hidden behind it
+      askConfirm(
+        `"${newName}" already exists. Combine them? Their history and notes will be merged under that name.`,
+        doRename,
+        'Combine'
+      );
+    } else {
+      doRename();
+    }
   };
 
   // ============================================================
@@ -2024,8 +2185,8 @@ function ExerciseTracker() {
     updateFlexExercise(dayId, exId, (ex) => ({ ...ex, sets: [{ completed: false }] }));
   };
 
-  const updateFlexNotes = (dayId, exId, text) => {
-    updateFlexExercise(dayId, exId, (ex) => ({ ...ex, notes: text }));
+  const updateFlexNotes = (name, text) => {
+    setData((prev) => ({ ...prev, flexNotes: { ...(prev.flexNotes || {}), [noteKey(name)]: text } }));
   };
 
   const logFlexSession = (dayId, exId) => {
@@ -2622,7 +2783,7 @@ function ExerciseTracker() {
                               onClick={() => toggleNotes(ex.id)}
                               label="Notes"
                               active={openNotes[ex.id]}
-                              dot={!!ex.notes.trim()}
+                              dot={!!getNote(data.flexNotes, ex.name).trim()}
                             >
                               <StickyNote className="w-3.5 h-3.5" />
                             </IconButton>
@@ -2711,8 +2872,8 @@ function ExerciseTracker() {
                     {openNotes[ex.id] && (
                       <div className="px-3.5 pb-3 border-t border-stone-800 pt-2.5">
                         <textarea
-                          value={ex.notes}
-                          onChange={(e) => updateFlexNotes(activeFlexDay.id, ex.id, e.target.value)}
+                          value={getNote(data.flexNotes, ex.name)}
+                          onChange={(e) => updateFlexNotes(ex.name, e.target.value)}
                           placeholder="Form cues, pain flags, tempo, anything worth remembering…"
                           rows={2}
                           className="w-full bg-stone-950 border border-stone-800 rounded px-2.5 py-2 text-sm text-stone-200 placeholder-stone-700 outline-none focus:border-violet-400 resize-none"
@@ -2987,14 +3148,40 @@ function ExerciseTracker() {
                 <button
                   onClick={() => deleteProgram(data.activeProgramId)}
                   disabled={data.programs.length <= 1}
-                  title={data.programs.length <= 1 ? 'Create another program before deleting this one' : undefined}
+                  title={data.programs.length <= 1 ? 'Create another program before archiving this one' : undefined}
                   className={`flex items-center gap-1.5 text-xs ${
-                    data.programs.length <= 1 ? 'text-stone-800 cursor-not-allowed' : 'text-stone-600 hover:text-red-500'
+                    data.programs.length <= 1 ? 'text-stone-800 cursor-not-allowed' : 'text-stone-600 hover:text-stone-300'
                   }`}
                 >
-                  <Trash2 className="w-3 h-3" /> Delete program
+                  <ArchiveIcon className="w-3 h-3" /> Archive program
                 </button>
               </div>
+              {(data.archivedPrograms || []).length > 0 && (
+                <div className="mt-3 pt-2.5 border-t border-stone-800">
+                  <p className="text-[11px] font-bold uppercase tracking-wide text-stone-600 mb-1.5">Archived programs</p>
+                  <div className="space-y-1.5">
+                    {data.archivedPrograms.map((a) => (
+                      <div key={a.id} className="flex items-center justify-between gap-2 bg-stone-900 rounded-md px-2.5 py-1.5">
+                        <span className="text-sm text-stone-400 truncate">
+                          {a.name} <span className="text-stone-600 text-xs">· {a.dayIds.length} session{a.dayIds.length === 1 ? '' : 's'}</span>
+                        </span>
+                        <div className="flex items-center gap-3 shrink-0">
+                          <button onClick={() => restoreProgram(a.id)} className="text-xs font-bold text-cyan-500 hover:text-cyan-400">
+                            Restore
+                          </button>
+                          <button
+                            onClick={() => deleteArchivedProgram(a.id)}
+                            className="text-stone-600 hover:text-red-500"
+                            aria-label={`Permanently delete ${a.name}`}
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
               </>)}
             </div>
 
@@ -3281,7 +3468,7 @@ function ExerciseTracker() {
                               onClick={() => toggleNotes(ex.id)}
                               label="Notes"
                               active={openNotes[ex.id]}
-                              dot={!!ex.notes.trim()}
+                              dot={!!getNote(data.exerciseNotes, ex.name).trim()}
                             >
                               <StickyNote className="w-3.5 h-3.5" />
                             </IconButton>
@@ -3348,8 +3535,8 @@ function ExerciseTracker() {
                     {openNotes[ex.id] && (
                       <div className="px-3.5 pb-3 border-t border-stone-800 pt-2.5">
                         <textarea
-                          value={ex.notes}
-                          onChange={(e) => updateNotes(activeDay.id, ex.id, e.target.value)}
+                          value={getNote(data.exerciseNotes, ex.name)}
+                          onChange={(e) => updateNotes(ex.name, e.target.value)}
                           placeholder="Form cues, pain flags, tempo, anything worth remembering…"
                           rows={2}
                           className="w-full bg-stone-950 border border-stone-800 rounded px-2.5 py-2 text-sm text-stone-200 placeholder-stone-700 outline-none focus:border-cyan-700 resize-none"
@@ -3617,7 +3804,7 @@ function ExerciseTracker() {
                   setConfirm(null);
                 }}
                 className={`px-3 py-1.5 rounded text-sm font-bold text-stone-950 ${
-                  confirm.confirmLabel === 'Archive' || confirm.confirmLabel === 'Reset' || confirm.confirmLabel === 'Remove'
+                  confirm.confirmLabel === 'Archive' || confirm.confirmLabel === 'Reset' || confirm.confirmLabel === 'Remove' || confirm.confirmLabel === 'Combine'
                     ? 'bg-cyan-600 hover:bg-cyan-500'
                     : 'bg-red-600 hover:bg-red-500'
                 }`}
@@ -3635,6 +3822,9 @@ function ExerciseTracker() {
           stats={getExerciseStats(data.days, prName)}
           archivedMatches={getArchivedMatches(data.days, prName)}
           fullHistory={getFullHistory(data.days, prName)}
+          notes={getNote(data.exerciseNotes, prName)}
+          onNotesChange={(text) => updateNotes(prName, text)}
+          onRename={(n) => renameExerciseEverywhere('strength', prName, n)}
           onClose={() => setPrName(null)}
           onRestore={restoreExercise}
           onDeleteArchived={(dayId, exId, exName) => {
@@ -3650,6 +3840,9 @@ function ExerciseTracker() {
           stats={getStretchStats(data.flexDays, flexPrName)}
           archivedMatches={getArchivedMatches(data.flexDays, flexPrName)}
           fullHistory={getFullHistory(data.flexDays, flexPrName)}
+          notes={getNote(data.flexNotes, flexPrName)}
+          onNotesChange={(text) => updateFlexNotes(flexPrName, text)}
+          onRename={(n) => renameExerciseEverywhere('flex', flexPrName, n)}
           onClose={() => setFlexPrName(null)}
           onRestore={restoreFlexExercise}
           onDeleteArchived={(dayId, exId, exName) => {
@@ -3672,7 +3865,13 @@ function ExerciseTracker() {
   );
 }
 
-function PRModal({ name, stats, archivedMatches, fullHistory, onClose, onRestore, onDeleteArchived }) {
+function PRModal({ name, stats, archivedMatches, fullHistory, notes = '', onNotesChange, onRename, onClose, onRestore, onDeleteArchived }) {
+  const [renaming, setRenaming] = useState(false);
+  const [nameDraft, setNameDraft] = useState(name);
+  const finishRename = () => {
+    setRenaming(false);
+    if (onRename && nameDraft.trim() && nameDraft.trim() !== name) onRename(nameDraft.trim());
+  };
   return (
     <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 px-4" onClick={onClose}>
       <div
@@ -3681,12 +3880,48 @@ function PRModal({ name, stats, archivedMatches, fullHistory, onClose, onRestore
       >
         <div className="flex items-start justify-between mb-4">
           <div className="flex items-center gap-2">
-            <Trophy className="w-4 h-4 text-amber-500" />
-            <h3 className="text-base font-bold text-stone-100">{name}</h3>
+            <Trophy className="w-4 h-4 text-amber-500 shrink-0" />
+            {renaming ? (
+              <input
+                autoFocus
+                value={nameDraft}
+                onChange={(e) => setNameDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') finishRename();
+                  if (e.key === 'Escape') setRenaming(false);
+                }}
+                className="bg-stone-950 border border-stone-700 rounded px-2 py-0.5 text-base font-bold text-stone-100 outline-none focus:border-cyan-700 w-44"
+              />
+            ) : (
+              <h3 className="text-base font-bold text-stone-100">{name}</h3>
+            )}
+            {onRename && (
+              <button
+                onClick={() => (renaming ? finishRename() : (setNameDraft(name), setRenaming(true)))}
+                className="text-stone-500 hover:text-stone-200 shrink-0"
+                aria-label={renaming ? 'Save name' : 'Rename'}
+              >
+                {renaming ? <Check className="w-4 h-4" /> : <Pencil className="w-3.5 h-3.5" />}
+              </button>
+            )}
           </div>
           <button onClick={onClose} className="text-stone-500 hover:text-stone-300" aria-label="Close">
             <X className="w-5 h-5" />
           </button>
+        </div>
+
+        <div className="mb-4">
+          <p className="flex items-center gap-1.5 text-[11px] uppercase tracking-wide text-stone-500 mb-1.5">
+            <StickyNote className="w-3 h-3" /> Notes
+          </p>
+          <textarea
+            value={notes}
+            onChange={(e) => onNotesChange && onNotesChange(e.target.value)}
+            placeholder="Form cues, pain flags, tempo, anything worth remembering…"
+            rows={3}
+            className="w-full bg-stone-950 border border-stone-800 rounded px-2.5 py-2 text-sm text-stone-200 placeholder-stone-700 outline-none focus:border-cyan-700 resize-none"
+          />
+          <p className="text-[11px] text-stone-600 mt-1">Shared everywhere this name appears, in every session and program.</p>
         </div>
 
         {stats.sessions === 0 ? (
@@ -3773,7 +4008,13 @@ function PRModal({ name, stats, archivedMatches, fullHistory, onClose, onRestore
 }
 
 // Search-and-select from the library. Selection only — new exercises are added via the Library tab.
-function StretchPRModal({ name, stats, archivedMatches, fullHistory, onClose, onRestore, onDeleteArchived }) {
+function StretchPRModal({ name, stats, archivedMatches, fullHistory, notes = '', onNotesChange, onRename, onClose, onRestore, onDeleteArchived }) {
+  const [renaming, setRenaming] = useState(false);
+  const [nameDraft, setNameDraft] = useState(name);
+  const finishRename = () => {
+    setRenaming(false);
+    if (onRename && nameDraft.trim() && nameDraft.trim() !== name) onRename(nameDraft.trim());
+  };
   return (
     <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 px-4" onClick={onClose}>
       <div
@@ -3782,12 +4023,48 @@ function StretchPRModal({ name, stats, archivedMatches, fullHistory, onClose, on
       >
         <div className="flex items-start justify-between mb-4">
           <div className="flex items-center gap-2">
-            <Trophy className="w-4 h-4 text-violet-300" />
-            <h3 className="text-base font-bold text-stone-100">{name}</h3>
+            <Trophy className="w-4 h-4 text-violet-300 shrink-0" />
+            {renaming ? (
+              <input
+                autoFocus
+                value={nameDraft}
+                onChange={(e) => setNameDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') finishRename();
+                  if (e.key === 'Escape') setRenaming(false);
+                }}
+                className="bg-stone-950 border border-stone-700 rounded px-2 py-0.5 text-base font-bold text-stone-100 outline-none focus:border-violet-400 w-44"
+              />
+            ) : (
+              <h3 className="text-base font-bold text-stone-100">{name}</h3>
+            )}
+            {onRename && (
+              <button
+                onClick={() => (renaming ? finishRename() : (setNameDraft(name), setRenaming(true)))}
+                className="text-stone-500 hover:text-stone-200 shrink-0"
+                aria-label={renaming ? 'Save name' : 'Rename'}
+              >
+                {renaming ? <Check className="w-4 h-4" /> : <Pencil className="w-3.5 h-3.5" />}
+              </button>
+            )}
           </div>
           <button onClick={onClose} className="text-stone-500 hover:text-stone-300" aria-label="Close">
             <X className="w-5 h-5" />
           </button>
+        </div>
+
+        <div className="mb-4">
+          <p className="flex items-center gap-1.5 text-[11px] uppercase tracking-wide text-stone-500 mb-1.5">
+            <StickyNote className="w-3 h-3" /> Notes
+          </p>
+          <textarea
+            value={notes}
+            onChange={(e) => onNotesChange && onNotesChange(e.target.value)}
+            placeholder="Form cues, pain flags, tempo, anything worth remembering…"
+            rows={3}
+            className="w-full bg-stone-950 border border-stone-800 rounded px-2.5 py-2 text-sm text-stone-200 placeholder-stone-700 outline-none focus:border-violet-400 resize-none"
+          />
+          <p className="text-[11px] text-stone-600 mt-1">Shared everywhere this name appears, in every session and program.</p>
         </div>
 
         {stats.sessions === 0 ? (
